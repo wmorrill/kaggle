@@ -15,3 +15,66 @@ __author__ = 'wmorrill'
 
 # retrain inception v3 on 2d images?
 
+import tensorflow as tf
+import numpy as np
+
+IMAGE_SIZE = 28
+NUM_CHANNELS = 1
+PIXEL_DEPTH = 255
+NUM_LABELS = 10
+VALIDATION_SIZE = 5000  # Size of the validation set.
+SEED = 66478  # Set to None for random seed.
+BATCH_SIZE = 64
+NUM_EPOCHS = 10
+EVAL_BATCH_SIZE = 64
+EVAL_FREQUENCY = 100  # Number of steps between evaluations.
+
+def load_data(filename):
+    np.load(filename)
+
+def mask_and_partition(image_array, mask_array, min_value, max_value):
+    """
+    takes an image and applies the mask to it to narrow down area of interest,
+    then finds the points that fall within the bounds
+    :param image_array:
+    :param mask_array:
+    :param min_value:
+    :param max_value:
+    :return:
+    """
+    masked_image_array = tf.batch_matmul(image_array, mask_array)
+
+
+
+def slice_n_dice(image_array, cube_size):
+    """
+    Takes a preprocessed image and sliced into a bunch of cubes of various sizes and locations for easier processing
+    :param image_array: numpy array of the diacom image
+    :param cube_size: how big of a cube do you want
+    :return:
+    """
+
+
+def inspect_cube(cube_array):
+    """
+    takes a cube array subset of a 3D image and looks for something tumor-y
+    :param cube_array:
+    :return:
+    """
+    # is it tube shaped or not:
+    # find the center of mass
+    # find the mean distance for equally (with some buffer) dense pixels
+    # is the mean equal in all/most directions?
+    # are there bits touching the edges of the cube?
+    # How big are the cross sections that intersect the cube wall
+
+def make_2d(cube_array, x, y, z):
+    """
+    Takes a 3D array and x, y center point then outputs a few 2D slices through that centerpoint
+    :param cube_array: 3D numpy array
+    :param x: center point in x axis
+    :param y: center point in y axis
+    :param z: center point in z axis
+    :return:
+    """
+
