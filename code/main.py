@@ -29,8 +29,24 @@ NUM_EPOCHS = 10
 EVAL_BATCH_SIZE = 64
 EVAL_FREQUENCY = 100  # Number of steps between evaluations.
 
+
 def load_data(filename):
-    np.load(filename)
+    """
+    Args:
+        filename: location of .npz data file
+
+    Returns: 4 dimensional array
+        0 dimension = patient
+        1-3 dimension = density data x, y, z
+    """
+    raw_data = []
+    raw_npz = np.load(filename)
+
+    for i in range(len(raw_npz._files)):
+        raw_data.append(raw_npz[raw_npz._files[i]])
+
+    return raw_data
+
 
 def mask_and_partition(image_array, mask_array, min_value, max_value):
     """
@@ -42,8 +58,7 @@ def mask_and_partition(image_array, mask_array, min_value, max_value):
     :param max_value:
     :return:
     """
-    masked_image_array = tf.batch_matmul(image_array, mask_array)
-
+    # masked_image_array = tf.batch_matmul(image_array, mask_array)
 
 
 def slice_n_dice(image_array, cube_size):
@@ -68,6 +83,7 @@ def inspect_cube(cube_array):
     # are there bits touching the edges of the cube?
     # How big are the cross sections that intersect the cube wall
 
+
 def make_2d(cube_array, x, y, z):
     """
     Takes a 3D array and x, y center point then outputs a few 2D slices through that centerpoint
@@ -77,4 +93,3 @@ def make_2d(cube_array, x, y, z):
     :param z: center point in z axis
     :return:
     """
-
