@@ -223,44 +223,46 @@ def tf_poi(matrix, mask):
 
 
 if __name__ == '__main__':
-    save = False
-    print(datetime.datetime.now())
+    save_all = False
+    save_raw = False
+    save_resampled = False
+    save_segmented = True
+    print("%s - Preprocess Start" % datetime.datetime.now())
     #
     # patients_data = load_patients("C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\one_patient_segmented.npz")
     # for patient_id in patients_data.files:
     #     plot_3d(patients_data[patient_id], 0)
     # exit()
     patients_data = {}
+    # patients = patients[0:1]  # load only one patient
     # Load all the data
-    patients = patients[0:1]
     for patient in patients:
         raw_data = load_scan(INPUT_FOLDER + patient)
         raw_pixels = get_pixels_hu(raw_data)
         patients_data[patient] = raw_pixels
+    print("%s - Patients loaded" % datetime.datetime.now())
     # save it raw
-    if save:
+    if save_all or save_raw:
         store_patients("C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\sample_patients_raw", patients_data)
-    print(datetime.datetime.now())
-    print("Raw Saved")
+        print("Raw Saved")
     # resample all the data
     patients_data_resampled = {}
     for patient in patients:
         patients_data_resampled[patient], spacing = resample(patients_data[patient], load_scan(INPUT_FOLDER + patient))
+    print("%s - Patients Resampled" % datetime.datetime.now())
     # save it resampled
-    if save:
+    if save_all or save_resampled:
         store_patients("C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\sample_patients_resampled", patients_data_resampled)
-    print(datetime.datetime.now())
-    print("Resampled Saved")
+        print("Resampled Saved")
     # segment
     patients_data_mask = {}
     for patient in patients:
-        patients_data_mask[patient] = segment_lung_mask(patients_data[patient], True)
+        patients_data_mask[patient] = segment_lung_mask(patients_data_resampled[patient], True)
+    print("%s - Patients Segmented" % datetime.datetime.now())
     # save it segmented
-    if save:
+    if save_all or save_segmented:
         store_patients("C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\sample_patients_segmented", patients_data_mask)
-    print(datetime.datetime.now())
-    print("Segmentation Saved")
-
+        print("Segmentation Saved")
 
     # first_patient = load_scan(INPUT_FOLDER + patients[0])
     # first_patient_pixels = get_pixels_hu(first_patient)
