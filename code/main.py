@@ -187,6 +187,7 @@ def plot_3_by_3(raw, mask, masked, x=80, y=150, z=80):
     ax.set_title("yz masked")
     plt.imshow(masked_yz, cmap=plt.cm.gray)
     plt.show()
+    #TODO: add crosshair on x,y,z point
 
 
 if __name__ == "__main__":
