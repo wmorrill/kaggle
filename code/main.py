@@ -115,8 +115,22 @@ def make_2d_funky(cube_array, xyz1, xyz2, xyz3):
     :param xyz3: third point tuple (x,y,z)
     :return: 2d matrix
     """
-    #TODO: We probably want to be able to get a slice through the center of mass, farthest point and another point
-    # this would allow our image trainer to see some valuable images of the POI
+    x1, y1, z1 = xyz1
+    x2, y2, z2 = xyz2
+    x3, y3, z3 = xyz3
+    p1 = np.array([x1, y1, z1])
+    p2 = np.array([x2, y2, z2])
+    p3 = np.array([x3, y3, z3])
+    # These two vectors are in the plane
+    v1 = p3 - p1
+    v2 = p2 - p1
+    # the cross product is normal to the plane
+    cp = np.cross(v1, v2)
+    a, b, c = cp
+    #a * x + b * y + c * z = d
+    d = np.dot(cp, p1)
+    print('The equation is {0}x + {1}y + {2}z = {3}'.format(a, b, c, d))
+    
     return
 
 
@@ -145,15 +159,15 @@ def make_2d(cube_array, x, y, z):
     return xy_slice, xz_slice, yz_slice
 
 
-def plot_3_by_3(raw, mask, masked, x=80, y=150, z=80):
+def plot_3_by_3(raw, mask, masked, x=100, y=200, z=150):
     """
     makes a 3x3 subplot showing the raw, mask and masked image for each xy, xz and yz plane
     :param raw: 3d array of raw data
     :param mask: 3d array of mask
     :param masked: 3d array of masked data
-    :param x: the x point you want to slice at (defaults to 80)
-    :param y: the y point you want to slice at (defaults to 150)
-    :param z: the z point you want to slice at (defaults to 80)
+    :param x: the x point you want to slice at (defaults to 100)
+    :param y: the y point you want to slice at (defaults to 200)
+    :param z: the z point you want to slice at (defaults to 150)
     :return: no return
     """
     raw_xy, raw_xz, raw_yz = make_2d(raw, x, y, z)
@@ -162,32 +176,40 @@ def plot_3_by_3(raw, mask, masked, x=80, y=150, z=80):
     ax = plt.subplot(3, 3, 1)
     ax.set_title("xy raw")
     plt.imshow(raw_xy, cmap=plt.cm.gray)
+    plt.plot(x, y, '+', color='red', ms=20)
     ax = plt.subplot(3, 3, 2)
     ax.set_title("xy mask")
     plt.imshow(mask_xy, cmap=plt.cm.gray)
+    plt.plot(x, y, '+', color='red', ms=20)
     ax = plt.subplot(3, 3, 3)
     ax.set_title("xy masked")
     plt.imshow(masked_xy, cmap=plt.cm.gray)
+    plt.plot(x, y, '+', color='red', ms=20)
     ax = plt.subplot(3, 3, 4)
     ax.set_title("xz raw")
     plt.imshow(raw_xz, cmap=plt.cm.gray)
+    plt.plot(x, z, '+', color='red', ms=20)
     ax = plt.subplot(3, 3, 5)
     ax.set_title("xz mask")
     plt.imshow(mask_xz, cmap=plt.cm.gray)
+    plt.plot(x, z, '+', color='red', ms=20)
     ax = plt.subplot(3, 3, 6)
     ax.set_title("xz masked")
     plt.imshow(masked_xz, cmap=plt.cm.gray)
+    plt.plot(x, z, '+', color='red', ms=20)
     ax = plt.subplot(3, 3, 7)
     ax.set_title("yz raw")
     plt.imshow(raw_yz, cmap=plt.cm.gray)
+    plt.plot(y, z, '+', color='red', ms=20)
     ax = plt.subplot(3, 3, 8)
     ax.set_title("yz mask")
     plt.imshow(mask_yz, cmap=plt.cm.gray)
+    plt.plot(y, z, '+', color='red', ms=20)
     ax = plt.subplot(3, 3, 9)
     ax.set_title("yz masked")
     plt.imshow(masked_yz, cmap=plt.cm.gray)
+    plt.plot(y, z, '+', color='red', ms=20)
     plt.show()
-    #TODO: add crosshair on x,y,z point
 
 
 if __name__ == "__main__":
