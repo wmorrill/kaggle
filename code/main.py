@@ -106,6 +106,7 @@ def inspect_cube(cube_array):
     # How big are the cross sections that intersect the cube wall
     return
 
+
 def make_2d_funky(cube_array, xyz1, xyz2, xyz3):
     """
     make a 2d array given a 3d array and 3 point
@@ -113,8 +114,9 @@ def make_2d_funky(cube_array, xyz1, xyz2, xyz3):
     :param xyz1: first point tuple (x,y,z)
     :param xyz2: second point tuple (x,y,z)
     :param xyz3: third point tuple (x,y,z)
-    :return: 2d matrix
+    :return: 2d matrix  with the most non-zero values
     """
+    return_matrix = []
     x1, y1, z1 = xyz1
     x2, y2, z2 = xyz2
     x3, y3, z3 = xyz3
@@ -129,9 +131,61 @@ def make_2d_funky(cube_array, xyz1, xyz2, xyz3):
     a, b, c = cp
     #a * x + b * y + c * z = d
     d = np.dot(cp, p1)
-    print('The equation is {0}x + {1}y + {2}z = {3}'.format(a, b, c, d))
-    
-    return
+    # print('The equation is {0}x + {1}y + {2}z = {3}'.format(a, b, c, d))
+    return_arr = []
+    for z in range(len(cube_array)):
+        row = []
+        for y in range(len(cube_array[0])):
+            x = int((c*z + b*y - d)/-a)
+            if 0 <= x < len(cube_array[z][y]):
+                value = cube_array[z][y][x]
+                row.append(value)
+            else:
+                row.append(-1024)
+        return_arr.append(row)
+
+    return_arr2 = []
+    for y in range(len(cube_array[0])):
+        row = []
+        for x in range(len(cube_array[0][0])):
+            z = int((a*x + b*y - d)/-c)
+            if 0 <= z < len(cube_array):
+                value = cube_array[z][y][x]
+                row.append(value)
+            else:
+                row.append(-1024)
+        return_arr2.append(row)
+
+    return_arr3 = []
+    for z in range(len(cube_array)):
+        row = []
+        for x in range(len(cube_array[0][0])):
+            y = int((a*x + c*z - d)/-b)
+            if 0 <= y < len(cube_array[z]):
+                value = cube_array[z][y][x]
+                row.append(value)
+            else:
+                row.append(-1024)
+        return_arr3.append(row)
+
+    nonzero1 = np.count_nonzero(np.add(return_arr, 1024))
+    nonzero2 = np.count_nonzero(np.add(return_arr2, 1024))
+    nonzero3 = np.count_nonzero(np.add(return_arr3, 1024))
+    # demo comparison of the 3 options
+    # print(nonzero1, nonzero2, nonzero3)
+    # plt.subplot(311)
+    # plt.imshow(return_arr, cmap=plt.cm.gray)
+    # plt.subplot(312)
+    # plt.imshow(return_arr2, cmap=plt.cm.gray)
+    # plt.subplot(313)
+    # plt.imshow(return_arr3, cmap=plt.cm.gray)
+    # plt.show()
+    if nonzero1 >= nonzero2 and nonzero1 >= nonzero3:
+        return return_arr
+    elif nonzero2 > nonzero1 and nonzero2 >= nonzero3:
+        return return_arr2
+    else:
+        return return_arr3
 
 
 def make_2d(cube_array, x, y, z):
@@ -227,5 +281,14 @@ if __name__ == "__main__":
     print("Winner chosen at random")
     lucky_winner_raw_data = dict_of_patients[lucky_winner]
     lucky_winner_mask = dict_of_masks[lucky_winner]
+    # apply mask and plot 3 by 3
     lucky_winner_masked_data = mask_and_partition(dict_of_patients[lucky_winner], dict_of_masks[lucky_winner])
     plot_3_by_3(lucky_winner_raw_data,lucky_winner_mask,lucky_winner_masked_data)
+
+    # pick a random 3 points to make a plane and display that plane
+    p1 = (1, 1, 150)
+    p2 = (300, 100, 50)
+    p3 = (100, 300, 10)
+    slice_2d = make_2d_funky(lucky_winner_raw_data, p1, p2, p3)
+    plt.imshow(slice_2d)
+    plt.show()
