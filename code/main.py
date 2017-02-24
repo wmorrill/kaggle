@@ -19,6 +19,8 @@ import tensorflow as tf
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from scipy import ndimage
+import time
 
 IMAGE_SIZE = 28
 NUM_CHANNELS = 1
@@ -31,6 +33,7 @@ NUM_EPOCHS = 10
 EVAL_BATCH_SIZE = 64
 EVAL_FREQUENCY = 100  # Number of steps between evaluations.
 
+session = tf.Session()
 
 def load_data(filename):
     """
@@ -78,8 +81,22 @@ def mask_and_partition(image_array, mask_array, min_value = None, max_value = No
     :param max_value:
     :return:
     """
-    masked_image_array = tf.Session().run(tf.pow(image_array, mask_array))
-    return masked_image_array
+    # masked_image_array = tf.Session().run(tf.pow(image_array, mask_array))
+    # zeroes = np.zeros_like(image_array)
+    # air = np.full_like(image_array, -1000)
+
+    masked_image_array = session.run(tf.pow(image_array, mask_array))
+    print("masked")
+    zero = tf.constant(0, tf.int32)
+    air = tf.constant(-1000, tf.int32)
+    print("constants made")
+    offset = session.run(tf.multiply(air,tf.cast(tf.equal(mask_array,zero), tf.int32)))
+    print("offset")
+    sum = session.run(tf.add(masked_image_array, offset))
+    print("summed")
+    del masked_image_array
+    del offset
+    return sum
 
 
 def slice_n_dice(image_array, cube_size):
@@ -213,7 +230,60 @@ def make_2d(cube_array, x, y, z):
     return xy_slice, xz_slice, yz_slice
 
 
-def plot_3_by_3(raw, mask, masked, x=100, y=200, z=150):
+# def plot_3_by_3(raw, mask, masked, x=100, y=200, z=150):
+#     """
+#     makes a 3x3 subplot showing the raw, mask and masked image for each xy, xz and yz plane
+#     :param raw: 3d array of raw data
+#     :param mask: 3d array of mask
+#     :param masked: 3d array of masked data
+#     :param x: the x point you want to slice at (defaults to 100)
+#     :param y: the y point you want to slice at (defaults to 200)
+#     :param z: the z point you want to slice at (defaults to 150)
+#     :return: no return
+#     """
+#     raw_xy, raw_xz, raw_yz = make_2d(raw, x, y, z)
+#     mask_xy, mask_xz, mask_yz = make_2d(mask, x, y, z)
+#     masked_xy, masked_xz, masked_yz = make_2d(masked, x, y, z)
+#     ax = plt.subplot(3, 3, 1)
+#     ax.set_title("xy raw")
+#     plt.imshow(raw_xy, cmap=plt.cm.gray)
+#     plt.plot(x, y, '+', color='red', ms=20)
+#     ax = plt.subplot(3, 3, 2)
+#     ax.set_title("xy mask")
+#     plt.imshow(mask_xy, cmap=plt.cm.gray)
+#     plt.plot(x, y, '+', color='red', ms=20)
+#     ax = plt.subplot(3, 3, 3)
+#     ax.set_title("xy masked")
+#     plt.imshow(masked_xy, cmap=plt.cm.gray)
+#     plt.plot(x, y, '+', color='red', ms=20)
+#     ax = plt.subplot(3, 3, 4)
+#     ax.set_title("xz raw")
+#     plt.imshow(raw_xz, cmap=plt.cm.gray)
+#     plt.plot(x, z, '+', color='red', ms=20)
+#     ax = plt.subplot(3, 3, 5)
+#     ax.set_title("xz mask")
+#     plt.imshow(mask_xz, cmap=plt.cm.gray)
+#     plt.plot(x, z, '+', color='red', ms=20)
+#     ax = plt.subplot(3, 3, 6)
+#     ax.set_title("xz masked")
+#     plt.imshow(masked_xz, cmap=plt.cm.gray)
+#     plt.plot(x, z, '+', color='red', ms=20)
+#     ax = plt.subplot(3, 3, 7)
+#     ax.set_title("yz raw")
+#     plt.imshow(raw_yz, cmap=plt.cm.gray)
+#     plt.plot(y, z, '+', color='red', ms=20)
+#     ax = plt.subplot(3, 3, 8)
+#     ax.set_title("yz mask")
+#     plt.imshow(mask_yz, cmap=plt.cm.gray)
+#     plt.plot(y, z, '+', color='red', ms=20)
+#     ax = plt.subplot(3, 3, 9)
+#     ax.set_title("yz masked")
+#     plt.imshow(masked_yz, cmap=plt.cm.gray)
+#     plt.plot(y, z, '+', color='red', ms=20)
+#     plt.show()
+
+
+def plot_3_by_3(img_tuple, x=100, y=200, z=150):
     """
     makes a 3x3 subplot showing the raw, mask and masked image for each xy, xz and yz plane
     :param raw: 3d array of raw data
@@ -224,47 +294,95 @@ def plot_3_by_3(raw, mask, masked, x=100, y=200, z=150):
     :param z: the z point you want to slice at (defaults to 150)
     :return: no return
     """
-    raw_xy, raw_xz, raw_yz = make_2d(raw, x, y, z)
-    mask_xy, mask_xz, mask_yz = make_2d(mask, x, y, z)
-    masked_xy, masked_xz, masked_yz = make_2d(masked, x, y, z)
-    ax = plt.subplot(3, 3, 1)
-    ax.set_title("xy raw")
-    plt.imshow(raw_xy, cmap=plt.cm.gray)
-    plt.plot(x, y, '+', color='red', ms=20)
-    ax = plt.subplot(3, 3, 2)
-    ax.set_title("xy mask")
-    plt.imshow(mask_xy, cmap=plt.cm.gray)
-    plt.plot(x, y, '+', color='red', ms=20)
-    ax = plt.subplot(3, 3, 3)
-    ax.set_title("xy masked")
-    plt.imshow(masked_xy, cmap=plt.cm.gray)
-    plt.plot(x, y, '+', color='red', ms=20)
-    ax = plt.subplot(3, 3, 4)
-    ax.set_title("xz raw")
-    plt.imshow(raw_xz, cmap=plt.cm.gray)
-    plt.plot(x, z, '+', color='red', ms=20)
-    ax = plt.subplot(3, 3, 5)
-    ax.set_title("xz mask")
-    plt.imshow(mask_xz, cmap=plt.cm.gray)
-    plt.plot(x, z, '+', color='red', ms=20)
-    ax = plt.subplot(3, 3, 6)
-    ax.set_title("xz masked")
-    plt.imshow(masked_xz, cmap=plt.cm.gray)
-    plt.plot(x, z, '+', color='red', ms=20)
-    ax = plt.subplot(3, 3, 7)
-    ax.set_title("yz raw")
-    plt.imshow(raw_yz, cmap=plt.cm.gray)
-    plt.plot(y, z, '+', color='red', ms=20)
-    ax = plt.subplot(3, 3, 8)
-    ax.set_title("yz mask")
-    plt.imshow(mask_yz, cmap=plt.cm.gray)
-    plt.plot(y, z, '+', color='red', ms=20)
-    ax = plt.subplot(3, 3, 9)
-    ax.set_title("yz masked")
-    plt.imshow(masked_yz, cmap=plt.cm.gray)
-    plt.plot(y, z, '+', color='red', ms=20)
+    # raw, mask, masked = img_tuple
+    for i, img in enumerate(img_tuple):
+        raw_xy, raw_xz, raw_yz = make_2d(img, x, y, z)
+        ax = plt.subplot(3, len(img_tuple), i+1)
+        ax.set_title("xy %d"%(i+1))
+        plt.imshow(raw_xy, cmap=plt.cm.gray)
+        plt.plot(x, y, '+', color='red', ms=20)
+
+        ax = plt.subplot(3, len(img_tuple), len(img_tuple)+i+1)
+        ax.set_title("xz %d"%(i+1))
+        plt.imshow(raw_xz, cmap=plt.cm.gray)
+        plt.plot(x, z, '+', color='red', ms=20)
+
+        ax = plt.subplot(3, len(img_tuple), 2*len(img_tuple)+i+1)
+        ax.set_title("yz %d"%(i+1))
+        plt.imshow(raw_yz, cmap=plt.cm.gray)
+        plt.plot(y, z, '+', color='red', ms=20)
+
     plt.show()
 
+
+def mask_dilation(mask, iteration = 1):
+    print("starting dilation")
+    dilated = ndimage.binary_dilation(mask, iterations=iteration).astype(mask.dtype)
+    erosion = ndimage.binary_erosion(dilated, iterations=iteration).astype(mask.dtype)
+    del dilated
+    return erosion
+
+
+def mask_erosion(mask, iteration = 1):
+    print("starting erosion")
+    erosion = ndimage.binary_erosion(mask, iterations=iteration).astype(mask.dtype)
+    dilated = ndimage.binary_dilation(erosion, iterations=iteration+1).astype(mask.dtype)
+    del erosion
+    return dilated
+
+
+def density_mask(raw, value, threshold):
+    limit = np.full_like(raw, threshold)
+    adjustment = np.full_like(raw, value)
+    # raw_adjusted = tf.Session().run(tf.subtract(raw, adjustment))
+    # raw_adjusted_abs = tf.Session().run(tf.abs(raw_adjusted))
+    mask = session.run(tf.less(tf.abs(tf.subtract(raw, adjustment)), limit))
+    del limit
+    del adjustment
+    return mask
+
+
+def find_cm(raw, iterations=1, window_size=100, x=0, y=0, z=0):
+    # TODO: fix windowing - doesnt work... :/
+    for i in range(iterations):
+        if x or y or z:
+            # find x min and max
+            xmin = x - window_size/2
+            if xmin < 0:
+                xmin = 0
+            xmax = xmin + window_size
+            if xmax > len(raw[0][0])-1:
+                xmax = len(raw[0][0]-1)
+                xmin = xmax - window_size
+            # find y min and max
+            ymin = y - window_size/2
+            if ymin < 0:
+                ymin = 0
+            ymax = ymin + window_size
+            if ymax > len(raw[0])-1:
+                ymax = len(raw[0]-1)
+                ymin = ymax - window_size
+            # find z min and max
+            zmin = z - window_size/2
+            if zmin < 0:
+                zmin = 0
+            zmax = zmin + window_size
+            if zmax > len(raw)-1:
+                zmax = len(raw-1)
+                zmin = zmax - window_size
+            windowed = raw[zmin:zmax][xmin:xmax][ymin:ymax]
+            plt.imshow(windowed, cmap=plt.cm.gray)
+            plt.show()
+            z, y, x = ndimage.measurements.center_of_mass(windowed)
+        else:
+            z, y, x = ndimage.measurements.center_of_mass(raw)
+        # debug
+        # plot on each iteration
+        x = int(x)
+        y = int(y)
+        z = int(z)
+        plot_3_by_3((raw,), x, y, z)
+    return x, y, z
 
 if __name__ == "__main__":
     raw_patients_file = 'C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\sample_patients_resampled.npz'
@@ -281,14 +399,35 @@ if __name__ == "__main__":
     print("Winner chosen at random")
     lucky_winner_raw_data = dict_of_patients[lucky_winner]
     lucky_winner_mask = dict_of_masks[lucky_winner]
-    # apply mask and plot 3 by 3
-    lucky_winner_masked_data = mask_and_partition(dict_of_patients[lucky_winner], dict_of_masks[lucky_winner])
-    plot_3_by_3(lucky_winner_raw_data,lucky_winner_mask,lucky_winner_masked_data)
+    # to save memory let's get rid of the rest of the data
+    del dict_of_patients
+    del dict_of_masks
+    print("Apply Mask Dilation")
+    lucky_winner_mask_dilation = mask_dilation(lucky_winner_mask, 6)
+
+    # # apply mask and plot 3 by 3
+    # lucky_winner_masked_data = mask_and_partition(dict_of_patients[lucky_winner], dict_of_masks[lucky_winner])
+    # plot_3_by_3(lucky_winner_raw_data,lucky_winner_mask,lucky_winner_masked_data)
+    # do it again with the modified mask
+    print("done... getting masked data")
+    lucky_winner_masked_data = mask_and_partition(lucky_winner_raw_data, lucky_winner_mask_dilation)
+    print("done... getting density mask")
+    lucky_winner_density_mask = density_mask(lucky_winner_masked_data, -50, 100)
+    print("done... dilating density mask")
+    lucky_winner_density_mask_dilation = mask_dilation(lucky_winner_density_mask, 3)
+    print("done... erode density mask")
+    #try to get rid of veins and keep only blobs
+    lucky_winner_density_mask_erosion = mask_erosion(lucky_winner_density_mask, 1)
+    print("done... plotting...")
+    plot_3_by_3((lucky_winner_masked_data,lucky_winner_density_mask_dilation, lucky_winner_density_mask_erosion))
+    #calc center of mass
+    x, y, z = find_cm(lucky_winner_density_mask_erosion, 5)
+
 
     # pick a random 3 points to make a plane and display that plane
-    p1 = (1, 1, 150)
-    p2 = (300, 100, 50)
-    p3 = (100, 300, 10)
-    slice_2d = make_2d_funky(lucky_winner_raw_data, p1, p2, p3)
-    plt.imshow(slice_2d)
-    plt.show()
+    # p1 = (1, 1, 150)
+    # p2 = (300, 100, 50)
+    # p3 = (100, 300, 10)
+    # slice_2d = make_2d_funky(lucky_winner_raw_data, p1, p2, p3)
+    # plt.imshow(slice_2d)
+    # plt.show()
