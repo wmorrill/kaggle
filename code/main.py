@@ -283,7 +283,7 @@ def make_2d(cube_array, x, y, z):
 #     plt.show()
 
 
-def plot_3_by_3(img_tuple, x=100, y=200, z=150):
+def plot_3_by_3(img_tuple, points=[(100, 200, 150)]):
     """
     makes a 3x3 subplot showing the raw, mask and masked image for each xy, xz and yz plane
     :param raw: 3d array of raw data
@@ -296,6 +296,14 @@ def plot_3_by_3(img_tuple, x=100, y=200, z=150):
     """
     # raw, mask, masked = img_tuple
     for i, img in enumerate(img_tuple):
+        if len(points) == 1:
+            x = points[0][0]
+            y = points[0][1]
+            z = points[0][2]
+        else:
+            x = points[i][0]
+            y = points[i][1]
+            z = points[i][2]
         raw_xy, raw_xz, raw_yz = make_2d(img, x, y, z)
         ax = plt.subplot(3, len(img_tuple), i+1)
         ax.set_title("xy %d"%(i+1))
@@ -343,45 +351,54 @@ def density_mask(raw, value, threshold):
 
 
 def find_cm(raw, iterations=1, window_size=100, x=0, y=0, z=0):
-    # TODO: fix windowing - doesnt work... :/
     for i in range(iterations):
         if x or y or z:
             # find x min and max
-            xmin = x - window_size/2
+            xmin = x - int(window_size/2)
             if xmin < 0:
                 xmin = 0
             xmax = xmin + window_size
             if xmax > len(raw[0][0])-1:
-                xmax = len(raw[0][0]-1)
+                xmax = len(raw[0][0])-1
                 xmin = xmax - window_size
             # find y min and max
-            ymin = y - window_size/2
+            ymin = y - int(window_size/2)
             if ymin < 0:
                 ymin = 0
             ymax = ymin + window_size
             if ymax > len(raw[0])-1:
-                ymax = len(raw[0]-1)
+                ymax = len(raw[0])-1
                 ymin = ymax - window_size
             # find z min and max
-            zmin = z - window_size/2
+            zmin = z - int(window_size/2)
             if zmin < 0:
                 zmin = 0
             zmax = zmin + window_size
             if zmax > len(raw)-1:
-                zmax = len(raw-1)
+                zmax = len(raw)-1
                 zmin = zmax - window_size
-            windowed = raw[zmin:zmax][xmin:xmax][ymin:ymax]
-            plt.imshow(windowed, cmap=plt.cm.gray)
-            plt.show()
-            z, y, x = ndimage.measurements.center_of_mass(windowed)
+            windowed = raw[zmin:zmax,ymin:ymax,xmin:xmax]
+            # plt.imshow(windowed[150], cmap=plt.cm.gray)
+            # plt.show()
+            value = ndimage.measurements.center_of_mass(windowed)
+            if np.isnan(value).any():
+                return x, y, z
+            z, y, x = value
+            print(x,y,z)
+            x += xmin
+            y += ymin
+            z += zmin
+            print(x,y,z)
         else:
             z, y, x = ndimage.measurements.center_of_mass(raw)
+            print(x,y,z)
         # debug
         # plot on each iteration
         x = int(x)
         y = int(y)
         z = int(z)
-        plot_3_by_3((raw,), x, y, z)
+        # plot on each iteration for debug
+        # plot_3_by_3((raw,), [(x, y, z)])
     return x, y, z
 
 if __name__ == "__main__":
@@ -396,7 +413,8 @@ if __name__ == "__main__":
     lucky_winner = None
     while lucky_winner not in dict_of_patients:
         lucky_winner = random_patient_with_cancer(source_of_truth)
-    print("Winner chosen at random")
+    print("Winner chosen at random: ", end='')
+    print(lucky_winner)
     lucky_winner_raw_data = dict_of_patients[lucky_winner]
     lucky_winner_mask = dict_of_masks[lucky_winner]
     # to save memory let's get rid of the rest of the data
@@ -421,7 +439,35 @@ if __name__ == "__main__":
     print("done... plotting...")
     plot_3_by_3((lucky_winner_masked_data,lucky_winner_density_mask_dilation, lucky_winner_density_mask_erosion))
     #calc center of mass
-    x, y, z = find_cm(lucky_winner_density_mask_erosion, 5)
+    main_hotspot = find_cm(lucky_winner_density_mask_erosion, 5)
+    zmax = len(lucky_winner_density_mask_erosion)-1
+    ymax = len(lucky_winner_density_mask_erosion[0])-1
+    xmax = len(lucky_winner_density_mask_erosion[0][0])-1
+    quadrant_1_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(zmax/2), x=1, y=1, z=1)
+    quadrant_2_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(zmax/2), x=xmax, y=1, z=1)
+    quadrant_3_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(zmax/2), x=xmax, y=ymax, z=1)
+    quadrant_4_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(zmax/2), x=xmax, y=ymax, z=zmax)
+    quadrant_5_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(zmax/2), x=1, y=ymax, z=1)
+    quadrant_6_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(zmax/2), x=1, y=ymax, z=zmax)
+    quadrant_7_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(zmax/2), x=1, y=1, z=zmax)
+    quadrant_8_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(zmax/2), x=xmax, y=1, z=zmax)
+    raw_tuple = (lucky_winner_raw_data, lucky_winner_raw_data, lucky_winner_raw_data,
+                 lucky_winner_raw_data, lucky_winner_raw_data, lucky_winner_raw_data,
+                 lucky_winner_raw_data, lucky_winner_raw_data, lucky_winner_raw_data)
+    hotspots = [main_hotspot,
+                quadrant_1_hotspot,
+                quadrant_2_hotspot,
+                quadrant_3_hotspot,
+                quadrant_4_hotspot,
+                quadrant_5_hotspot,
+                quadrant_6_hotspot,
+                quadrant_7_hotspot,
+                quadrant_8_hotspot]
+    plot_3_by_3(raw_tuple, hotspots)
+
+    # slice_2d = make_2d_funky(lucky_winner_raw_data, main_hotspot, quadrant_1_hotspot, quadrant_2_hotspot)
+    # plt.imshow(slice_2d)
+    # plt.show()
 
 
     # pick a random 3 points to make a plane and display that plane
