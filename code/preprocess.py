@@ -2,12 +2,13 @@ import numpy as np # linear algebra
 import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
 import dicom
 import os
-import scipy.ndimage
+import scipy.ndimage as ndimage
 import matplotlib.pyplot as plt
 import datetime
-from skimage import measure, morphology
+from skimage import measure, morphology, segmentation
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import tensorflow as tf
+import multiprocessing
 
 # Some constants
 INPUT_FOLDER = 'C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\Sample_data\\'
@@ -70,14 +71,15 @@ def resample(image, scan, new_spacing=[1,1,1]):
     # Determine current pixel spacing
     spacing = map(float, ([scan[0].SliceThickness] + scan[0].PixelSpacing))
     spacing = np.array(list(spacing))
-
+    #don't want to loose data, so let's go with the smallest current spacing
+    new_spacing = [min(spacing),min(spacing),min(spacing)]
     resize_factor = spacing / new_spacing
     new_real_shape = image.shape * resize_factor
     new_shape = np.round(new_real_shape)
     real_resize_factor = new_shape / image.shape
     new_spacing = spacing / real_resize_factor
 
-    image = scipy.ndimage.interpolation.zoom(image, real_resize_factor)
+    image = ndimage.interpolation.zoom(image, real_resize_factor)
 
     return image, new_spacing
 
@@ -117,22 +119,133 @@ def largest_label_volume(im, bg=-1):
         biggest = None
     return biggest
 
-def segment_lung_mask(image, fill_lung_structures=True):
+def generate_markers(image):
+    """
+    Used by the separate_lungs() function below
+    :param image:
+    :return:
+    """
+    #Creation of the internal Marker
+    marker_internal = image < -400
+    marker_internal = segmentation.clear_border(marker_internal)
+    marker_internal_labels = measure.label(marker_internal)
+    areas = [r.area for r in measure.regionprops(marker_internal_labels)]
+    areas.sort()
+    if len(areas) > 2:
+        for region in measure.regionprops(marker_internal_labels):
+            if region.area < areas[-2]:
+                for coordinates in region.coords:
+                       marker_internal_labels[coordinates[0], coordinates[1]] = 0
+    marker_internal = marker_internal_labels > 0
+    #Creation of the external Marker
+    external_a = ndimage.binary_dilation(marker_internal, iterations=10)
+    external_b = ndimage.binary_dilation(marker_internal, iterations=55)
+    marker_external = external_b ^ external_a
+    #Creation of the Watershed Marker matrix
+    marker_watershed = np.zeros(marker_internal.shape, dtype=np.int)
+    marker_watershed += marker_internal * 255
+    marker_watershed += marker_external * 128
 
+    return marker_internal, marker_external, marker_watershed
+
+def separate_lungs(image, return_list=None, iteration=-1):
+    """
+    This only takes in a 2D slice to make he lung segmentation and takes really long to run.
+    But supposedly will get all corner cases. Not sure if mask from this is very good.
+    Looks like the mask might be too dilated.
+
+    :param image:
+    :param return_list:
+    :param iteration:
+    :return:
+    """
+    #Creation of the markers as shown above:
+    marker_internal, marker_external, marker_watershed = generate_markers(image)
+
+    #Creation of the Sobel-Gradient
+    sobel_filtered_dx = ndimage.sobel(image, 1)
+    sobel_filtered_dy = ndimage.sobel(image, 0)
+    sobel_gradient = np.hypot(sobel_filtered_dx, sobel_filtered_dy)
+    sobel_gradient *= 255.0 / np.max(sobel_gradient)
+
+    #Watershed algorithm
+    watershed = morphology.watershed(sobel_gradient, marker_watershed)
+
+    #Reducing the image created by the Watershed algorithm to its outline
+    outline = ndimage.morphological_gradient(watershed, size=(3,3))
+    outline = outline.astype(bool)
+
+    #Performing Black-Tophat Morphology for reinclusion
+    #Creation of the disk-kernel and increasing its size a bit
+    blackhat_struct = [[0, 0, 1, 1, 1, 0, 0],
+                       [0, 1, 1, 1, 1, 1, 0],
+                       [1, 1, 1, 1, 1, 1, 1],
+                       [1, 1, 1, 1, 1, 1, 1],
+                       [1, 1, 1, 1, 1, 1, 1],
+                       [0, 1, 1, 1, 1, 1, 0],
+                       [0, 0, 1, 1, 1, 0, 0]]
+    blackhat_struct = ndimage.iterate_structure(blackhat_struct, 8)
+    #Perform the Black-Hat
+    outline += ndimage.black_tophat(outline, structure=blackhat_struct)
+
+    #Use the internal marker and the Outline that was just created to generate the lungfilter
+    lungfilter = np.bitwise_or(marker_internal, outline)
+    #Close holes in the lungfilter
+    #fill_holes is not used here, since in some slices the heart would be reincluded by accident
+    lungfilter = ndimage.morphology.binary_closing(lungfilter, structure=np.ones((5,5)), iterations=3)
+
+    # #Apply the lungfilter (note the filtered areas being assigned -2000 HU)
+    # segmented = np.where(lungfilter == 1, image, -2000*np.ones((512, 512)))
+    if iteration >=0 and return_list:
+        return_list[iteration] = lungfilter
+    else:
+        return lungfilter
+
+def segment_lung_mask(image, fill_lung_structures=True):
+    """
+    This function works on 90% of images but fails on some corner cases
+
+    :param image:
+    :param fill_lung_structures:
+    :return:
+    """
+    # # shrink image to get rid of threacheotomy
+    # # z, y, x = image.shape
+    # shrink = 20
+    # image_shrink = image[shrink:-shrink,shrink:-shrink,shrink:-shrink]
+    # plt.subplot(211)
+    # plt.imshow(image[80])
+    # plt.subplot(212)
+    # plt.imshow(image_shrink[80-shrink])
+    # plt.show()
     # not actually binary, but 1 and 2.
     # 0 is treated as background, which we do not want
-    binary_image = np.array(image > -320, dtype=np.int8)+1
+    binary_image = np.array(image > -320, dtype=np.int8+1)
+    # dilated = scipy.ndimage.binary_dilation(binary_image, iterations=20).astype(binary_image.dtype)
+    # binary_image = scipy.ndimage.binary_erosion(dilated, iterations=20).astype(binary_image.dtype)
     labels = measure.label(binary_image)
 
     # Pick the pixel in the very corner to determine which label is air.
     #   Improvement: Pick multiple background labels from around the patient
     #   More resistant to "trays" on which the patient lays cutting the air
     #   around the person in half
-    background_label = labels[0,0,0]
+    background_label = []
+    background_label.append(labels[0,0,0])
+    # background_label.append(labels[-1,0,0])
+    # background_label.append(labels[-1,-1,0])
+    # background_label.append(labels[-1,-1,-1])
+    # background_label.append(labels[0,-1,0])
+    # background_label.append(labels[0,-1,-1])
+    # background_label.append(labels[0,0,-1])
+    # background_label.append(labels[-1,0,-1])
+    background_set = set(background_label)
 
     #Fill the air around the person
-    binary_image[background_label == labels] = 2
-
+    for value in background_set:
+        binary_image[value == labels] = 0
+        # print(value)
+        # plt.imshow(binary_image[80])
+        # plt.show()
 
     # Method of filling the lung structures (that is superior to something like
     # morphological closing)
@@ -158,35 +271,6 @@ def segment_lung_mask(image, fill_lung_structures=True):
 
     return binary_image
 
-# MIN_BOUND = -1000.0
-# MAX_BOUND = 400.0
-#
-# def normalize(image):
-#     image = (image - MIN_BOUND) / (MAX_BOUND - MIN_BOUND)
-#     image[image>1] = 1.
-#     image[image<0] = 0.
-#     return image
-#
-# PIXEL_MEAN = 0.25
-#
-# def zero_center(image):
-#     image = image - PIXEL_MEAN
-#     return image
-
-MIN_BOUND = -1000.0
-MAX_BOUND = 400.0
-PIXEL_MEAN = 0.25
-PIXEL_CORR = int((MAX_BOUND - MIN_BOUND) * PIXEL_MEAN) # in this case, 350
-
-def zero_center(image):
-    image = image - PIXEL_CORR
-    return image
-
-def normalize(image):
-    image = (image - MIN_BOUND) / (MAX_BOUND - MIN_BOUND)
-    image[image>(1-PIXEL_MEAN)] = 1.
-    image[image<(0-PIXEL_MEAN)] = 0.
-    return image
 
 def store_patients(file, img):
     try:
@@ -194,39 +278,29 @@ def store_patients(file, img):
     except:
         np.savez_compressed(file, img)
 
+
 def load_patients(file):
     patients = np.load(file)
     return patients
 
-def find_poi(array_3d, minimum=0, maximum=3000):
-    foo = 1
 
-def xy_slices(array_3d):
-    # create a single large 2d array from the 3d array in xy plane
-    pass
+def get_meta_data(scan):
+    # TODO: get meta-data from Dicom that might be useful for feature extraction
+    meta_dict = []
+    # get slice thickness
+    meta_dict['slice_thickness'] = scan[0].SliceThickness
+    # get pixel spacing in mm
+    meta_dict['pixel_spacing'] = scan[0].PixelSpacing
+    # anything else?
 
-def yz_slices(array_3d):
-    # create a single large 2d array from the 3d array in yz plane
-    pass
-
-def xz_slices(array_3d):
-    # create a single large 2d array from the 3d array in xz plane
-    pass
-
-def tf_poi(matrix, mask):
-    tf_mask = tf.constant(mask)
-    tf_matrix = tf.constant(matrix)
-    something = tf.mul(tf_mask, tf_matrix)
-    with tf.Session() as sess:
-        result = sess.run([something])
-        return result
+    return meta_dict
 
 
 if __name__ == '__main__':
     save_all = False
     save_raw = False
     save_resampled = False
-    save_segmented = True
+    save_segmented = False
     print("%s - Preprocess Start" % datetime.datetime.now())
     #
     # patients_data = load_patients("C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\one_patient_segmented.npz")
@@ -235,58 +309,77 @@ if __name__ == '__main__':
     # exit()
     patients_data = {}
     # patients = patients[0:1]  # load only one patient
-    # Load all the data
-    for patient in patients:
-        raw_data = load_scan(INPUT_FOLDER + patient)
-        raw_pixels = get_pixels_hu(raw_data)
-        patients_data[patient] = raw_pixels
-    print("%s - Patients loaded" % datetime.datetime.now())
-    # save it raw
-    if save_all or save_raw:
-        store_patients("C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\sample_patients_raw", patients_data)
-        print("Raw Saved")
-    # resample all the data
-    patients_data_resampled = {}
-    for patient in patients:
-        patients_data_resampled[patient], spacing = resample(patients_data[patient], load_scan(INPUT_FOLDER + patient))
-    print("%s - Patients Resampled" % datetime.datetime.now())
-    # save it resampled
-    if save_all or save_resampled:
-        store_patients("C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\sample_patients_resampled", patients_data_resampled)
-        print("Resampled Saved")
-    # segment
-    patients_data_mask = {}
-    for patient in patients:
-        patients_data_mask[patient] = segment_lung_mask(patients_data_resampled[patient], True)
-    print("%s - Patients Segmented" % datetime.datetime.now())
-    # save it segmented
-    if save_all or save_segmented:
-        store_patients("C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\sample_patients_segmented", patients_data_mask)
-        print("Segmentation Saved")
+    patients = ['0acbebb8d463b4b9ca88cf38431aac69'] # this one is hard for some reason
+    # # Load all the data
+    # for patient in patients:
+    #     raw_data = load_scan(INPUT_FOLDER + patient)
+    #     raw_pixels = get_pixels_hu(raw_data)
+    #     patients_data[patient] = raw_pixels
+    # print("%s - Patients loaded" % datetime.datetime.now())
+    # # save it raw
+    # if save_all or save_raw:
+    #     store_patients("C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\sample_patients_raw", patients_data)
+    #     print("Raw Saved")
+    # # resample all the data
+    # patients_data_resampled = {}
+    # for patient in patients:
+    #     patients_data_resampled[patient], spacing = resample(patients_data[patient], load_scan(INPUT_FOLDER + patient))
+    # print("%s - Patients Resampled" % datetime.datetime.now())
+    # # save it resampled
+    # if save_all or save_resampled:
+    #     store_patients("C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\sample_patients_resampled", patients_data_resampled)
+    #     print("Resampled Saved")
+    # # segment
+    # patients_data_mask = {}
+    # for patient in patients:
+    #     patients_data_mask[patient] = segment_lung_mask(patients_data_resampled[patient], True)
+    # print("%s - Patients Segmented" % datetime.datetime.now())
+    # # save it segmented
+    # if save_all or save_segmented:
+    #     store_patients("C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\sample_patients_segmented", patients_data_mask)
+    #     print("Segmentation Saved")
 
-    # first_patient = load_scan(INPUT_FOLDER + patients[0])
-    # first_patient_pixels = get_pixels_hu(first_patient)
-    # # plt.hist(first_patient_pixels.flatten(), bins=80, color='c')
-    # # plt.xlabel("Hounsfield Units (HU)")
-    # # plt.ylabel("Frequency")
-    # # plt.show()
-    #
+    first_patient = load_scan(INPUT_FOLDER + patients[0])
+    first_patient_pixels = get_pixels_hu(first_patient)
+    # plt.hist(first_patient_pixels.flatten(), bins=80, color='c')
+    # plt.xlabel("Hounsfield Units (HU)")
+    # plt.ylabel("Frequency")
+    # plt.show()
+
     # # Show some slice in the middle
-    # # plt.imshow(first_patient_pixels[80], cmap=plt.cm.gray)
-    # # plt.show()
-    #
-    # pix_resampled, spacing = resample(first_patient_pixels, first_patient, [1,1,1])
-    # print("Shape before resampling\t", first_patient_pixels.shape)
-    # print("Shape after resampling\t", pix_resampled.shape)
+    # plt.imshow(first_patient_pixels[80], cmap=plt.cm.gray)
+    # plt.show()
+
+    pix_resampled, spacing = resample(first_patient_pixels, first_patient, [1,1,1])
+    print("Shape before resampling\t", first_patient_pixels.shape)
+    print("Shape after resampling\t", pix_resampled.shape)
     #
     # # plot_3d(pix_resampled, 400)  # This takes forever
     #
     # segmented_lungs = segment_lung_mask(pix_resampled, False)
     # segmented_lungs_fill = segment_lung_mask(pix_resampled, True)
-    #
-    #
+
+    # # multiprocessing took 40 mins
+    # manager = multiprocessing.Manager()
+    # segmented_lungs_fill = manager.list([None] * len(pix_resampled))
+    # for i in range(len(pix_resampled)):
+    #     p = multiprocessing.Process(target=seperate_lungs, args=(pix_resampled[i], segmented_lungs_fill, i))
+    #     p.start()
+    # print("%s - Preprocess End" % datetime.datetime.now())
+    # plt.imshow(segmented_lungs_fill[80], cmap=plt.cm.gray)
+    # plt.show()
+    # # series processing also took 40 mins...
+    segmented_lungs_fill = list([None] * len(pix_resampled))
+    for i in range(len(pix_resampled)):
+        segmented_lungs_fill[i] = separate_lungs(pix_resampled[i])
+    print("%s - Preprocess End" % datetime.datetime.now())
+    plt.imshow(segmented_lungs_fill[264], cmap=plt.cm.gray)
+    plt.show()
+    # TODO: figure out how to speed this up? Maybe re-write seperate_lungs() function using tf
+
     # store_patients("C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\one_patient_segmented", segmented_lungs_fill)
     # # plot_3d(segmented_lungs, 0)
-    # # plot_3d(segmented_lungs_fill, 0)
-    # # plot_3d(segmented_lungs_fill - segmented_lungs, 0)
+    # TODO: figure out why this fails (TypeError?)
+    plot_3d(segmented_lungs_fill, 0)
+    # plot_3d(segmented_lungs_fill - segmented_lungs, 0)
 
