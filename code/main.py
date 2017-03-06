@@ -20,6 +20,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import ndimage
+from scipy import spatial
+from skimage.measure import label
+import gc
 
 IMAGE_SIZE = 28
 NUM_CHANNELS = 1
@@ -32,7 +35,7 @@ NUM_EPOCHS = 10
 EVAL_BATCH_SIZE = 64
 EVAL_FREQUENCY = 100  # Number of steps between evaluations.
 
-session = tf.Session()
+# session = tf.Session()
 
 
 def load_data(filename):
@@ -81,7 +84,7 @@ def apply_mask(image_array, mask_array):
     :param mask_array: (numpy 3D array) binary mask
     :return: (numpy 3D array) masked image
     """
-
+    session = tf.Session()
     masked_image_array = session.run(tf.pow(image_array, mask_array))
     # print("masked")
     zero = tf.constant(0, tf.int32)
@@ -92,8 +95,11 @@ def apply_mask(image_array, mask_array):
     sum_mask = session.run(tf.add(masked_image_array, offset))
     # print("summed")
     # do this to clear memory
+    session.close()
     del masked_image_array
     del offset
+    del image_array
+    del mask_array
     return sum_mask
 
 
@@ -278,6 +284,7 @@ def mask_erosion(mask, iteration=1):
     erosion = ndimage.binary_erosion(mask, iterations=iteration).astype(mask.dtype)
     dilated = ndimage.binary_dilation(erosion, iterations=iteration+1).astype(mask.dtype)
     del erosion
+    gc.collect()
     return dilated
 
 
@@ -294,7 +301,9 @@ def density_mask(raw, value, threshold):
     adjustment = np.full_like(raw, value)
     # raw_adjusted = tf.Session().run(tf.subtract(raw, adjustment))
     # raw_adjusted_abs = tf.Session().run(tf.abs(raw_adjusted))
+    session = tf.Session()
     mask = session.run(tf.less(tf.abs(tf.subtract(raw, adjustment)), limit))
+    session.close()
     del limit
     del adjustment
     return mask
@@ -365,6 +374,81 @@ def find_cm(raw, iterations=1, window_size=100, x=0, y=0, z=0):
         # plot_3_by_n((raw,), [(x, y, z)])
     return x, y, z
 
+
+def find_unique_objects(mask, volume_min=800, volume_max=15000, ratio_min=1.5, ratio_max=4):
+    """
+    takes a mask and finds all the unique objects floating in that area
+
+    :param mask: (np array) 3d binary image
+    :param volume_min: (int) smallest acceptable volume
+    :param volume_max: (int) largest acceptable volume
+    :param ratio_min: (int) smallest acceptable volume/area
+    :param ratio_max: (int) largest acceptable volume/area
+    :return: (dict) unique_blob_dict, is a dictionary of arrays holding the coordinates,
+    volume, area and original mask data for the given area
+    """
+    # get all the individual objects
+    labeled_data, num_of_unique_blobs = label(mask, background=0, return_num=True)
+    print("found %d unique objects" % num_of_unique_blobs)
+    unique_blob_dict = {'coordinates':[], 'volume':[], 'area':[], 'raw':[]}
+    # go through the objects and check if they are interesting
+    for i in range(1,num_of_unique_blobs):
+        # clears memory
+        tf.reset_default_graph()
+        # label gives each unique object a numeric value, so we sort based on that
+        search_value = tf.constant(i, tf.int64)
+        session = tf.Session()
+        # generate a mask that only has the one object in it
+        sub_mask = session.run(tf.equal(labeled_data, search_value))
+        session.close()
+        # get the bounding coordinates for this object
+        coords = np.argwhere(sub_mask)
+        # expand the coords to some standard size (30, 30, 30) or (50, 50, 50)
+        # TODO: make coordinates and raw return a consistent size (easier for cnn later)
+        top_left = coords.min(axis=0)
+        bottom_right = coords.max(axis=0)
+        # calculate the convex hull for this 3d object
+        hull = spatial.ConvexHull(coords,3)
+        # get the surface area and volume of the object
+        area = float(hull.area)
+        volume = float(hull.volume)
+        # TODO: equate these arbitrary numbers to actual mm
+        # if this object is within our interests, let's add it to the list
+        if volume_min < volume < volume_max and ratio_min < (volume/area) < ratio_max:
+            unique_blob_dict['coordinates'].append(find_cm(sub_mask, 1))
+            unique_blob_dict['raw'].append(sub_mask[top_left[0]:bottom_right[0]+1,
+                                                     top_left[1]:bottom_right[1]+1,
+                                                     top_left[2]:bottom_right[2]+1])
+            unique_blob_dict['volume'].append(volume)
+            unique_blob_dict['area'].append(area)
+
+
+            # for testing purposes
+            print('Volume = %f' % unique_blob_dict['volume'][-1])
+            print('Area = %f' % unique_blob_dict['area'][-1])
+            print('Volume/Area = %f' % (float(unique_blob_dict['volume'][-1])/float(unique_blob_dict['area'][-1])))
+            #plot_3_by_n((mask, sub_mask),[unique_blob_dict['coordinates'][-1]])
+
+            # from preprocess import plot_3d
+            # plot_3d(lucky_winner_density_mask_erosion, 0)
+        del sub_mask
+        del hull
+        del coords
+
+        # probably tumor
+        # Volume = 1262.166667
+        # Area = 618.409806
+        # Volume/Area = 2.040987
+
+        # probably tumor 0c0de3749d4fe175b7a5098b060982a1
+        # Volume = 8161.666667
+        # Area = 2178.180552
+        # Volume/Area = 3.747011
+
+
+    return unique_blob_dict
+
+
 if __name__ == "__main__":
     raw_patients_file = 'C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\sample_patients_resampled.npz'
     patient_masks_file = 'C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\sample_patients_segmented.npz'
@@ -385,6 +469,7 @@ if __name__ == "__main__":
     del dict_of_masks
     print("done... Apply Mask Dilation")
     lucky_winner_mask_dilation = mask_dilation(lucky_winner_mask, 6)
+    del lucky_winner_mask
 
     # # apply mask and plot 3 by 3
     # lucky_winner_masked_data = apply_mask(dict_of_patients[lucky_winner], dict_of_masks[lucky_winner])
@@ -392,48 +477,65 @@ if __name__ == "__main__":
     # do it again with the modified mask
     print("done... getting masked data")
     lucky_winner_masked_data = apply_mask(lucky_winner_raw_data, lucky_winner_mask_dilation)
+    del lucky_winner_mask_dilation
     print("done... getting density mask")
     lucky_winner_density_mask = density_mask(lucky_winner_masked_data, -50, 100)
+    del lucky_winner_masked_data
     print("done... dilating density mask")
     lucky_winner_density_mask_dilation = mask_dilation(lucky_winner_density_mask, 3)
+    del lucky_winner_density_mask
     print("done... erode density mask")
     # try to get rid of veins and keep only blobs
-    lucky_winner_density_mask_erosion = mask_erosion(lucky_winner_density_mask, 1)
+    lucky_winner_density_mask_erosion = mask_erosion(lucky_winner_density_mask_dilation, 1)
+    del lucky_winner_density_mask_dilation
     print("done... plotting...")
-    plot_3_by_n((lucky_winner_masked_data, lucky_winner_density_mask_dilation, lucky_winner_density_mask_erosion))
-    # calc center of mass
-    main_hotspot = find_cm(lucky_winner_density_mask_erosion, 5)
-    # find the max dimensions of each array
-    z_max = len(lucky_winner_density_mask_erosion)-1
-    y_max = len(lucky_winner_density_mask_erosion[0])-1
-    x_max = len(lucky_winner_density_mask_erosion[0][0])-1
-    # starting at each corner of the 3D array let's look fr local masses
-    # this will hopefully give us a few points to inspect per image versus the single center of mass
-    quadrant_1_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(z_max/2), x=1, y=1, z=1)
-    quadrant_2_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(z_max/2), x=x_max, y=1, z=1)
-    quadrant_3_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(z_max/2), x=x_max, y=y_max, z=1)
-    quadrant_4_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(z_max/2), x=x_max, y=y_max, z=z_max)
-    quadrant_5_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(z_max/2), x=1, y=y_max, z=1)
-    quadrant_6_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(z_max/2), x=1, y=y_max, z=z_max)
-    quadrant_7_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(z_max/2), x=1, y=1, z=z_max)
-    quadrant_8_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(z_max/2), x=x_max, y=1, z=z_max)
-    # generate the arrays to plot
-    raw_tuple = (lucky_winner_raw_data, lucky_winner_raw_data, lucky_winner_raw_data,
-                 lucky_winner_raw_data, lucky_winner_raw_data, lucky_winner_raw_data,
-                 lucky_winner_raw_data, lucky_winner_raw_data, lucky_winner_raw_data)
-    hotspots = [main_hotspot,
-                quadrant_1_hotspot,
-                quadrant_2_hotspot,
-                quadrant_3_hotspot,
-                quadrant_4_hotspot,
-                quadrant_5_hotspot,
-                quadrant_6_hotspot,
-                quadrant_7_hotspot,
-                quadrant_8_hotspot]
-    # plot all 9 center of mass findings (1 main and 8 corners)
-    plot_3_by_n(raw_tuple, hotspots)
-    # we can take a slice through the main cm and a few others just ot check it out
-    # slice_2d = make_2d_funky(lucky_winner_raw_data, main_hotspot, quadrant_1_hotspot, quadrant_2_hotspot)
-    # plt.imshow(slice_2d)
-    # plt.show()
+    # plot_3_by_n((lucky_winner_masked_data, lucky_winner_density_mask_dilation, lucky_winner_density_mask_erosion))
+    # # calc center of mass
+    # main_hotspot = find_cm(lucky_winner_density_mask_erosion, 5)
+    # # find the max dimensions of each array
+    # z_max = len(lucky_winner_density_mask_erosion)-1
+    # y_max = len(lucky_winner_density_mask_erosion[0])-1
+    # x_max = len(lucky_winner_density_mask_erosion[0][0])-1
+    # # starting at each corner of the 3D array let's look fr local masses
+    # # this will hopefully give us a few points to inspect per image versus the single center of mass
+    # quadrant_1_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(z_max/2), x=1, y=1, z=1)
+    # quadrant_2_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(z_max/2), x=x_max, y=1, z=1)
+    # quadrant_3_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(z_max/2), x=x_max, y=y_max, z=1)
+    # quadrant_4_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(z_max/2), x=x_max, y=y_max, z=z_max)
+    # quadrant_5_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(z_max/2), x=1, y=y_max, z=1)
+    # quadrant_6_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(z_max/2), x=1, y=y_max, z=z_max)
+    # quadrant_7_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(z_max/2), x=1, y=1, z=z_max)
+    # quadrant_8_hotspot = find_cm(lucky_winner_density_mask_erosion, 3, int(z_max/2), x=x_max, y=1, z=z_max)
+    # # generate the arrays to plot
+    # raw_tuple = (lucky_winner_density_mask_erosion, lucky_winner_density_mask_erosion, lucky_winner_density_mask_erosion,
+    #              lucky_winner_density_mask_erosion, lucky_winner_density_mask_erosion, lucky_winner_density_mask_erosion,
+    #              lucky_winner_density_mask_erosion, lucky_winner_density_mask_erosion, lucky_winner_density_mask_erosion)
+    # # raw_tuple = (lucky_winner_raw_data, lucky_winner_raw_data, lucky_winner_raw_data,
+    # #              lucky_winner_raw_data, lucky_winner_raw_data, lucky_winner_raw_data,
+    # #              lucky_winner_raw_data, lucky_winner_raw_data, lucky_winner_raw_data)
+    # hotspots = [main_hotspot,
+    #             quadrant_1_hotspot,
+    #             quadrant_2_hotspot,
+    #             quadrant_3_hotspot,
+    #             quadrant_4_hotspot,
+    #             quadrant_5_hotspot,
+    #             quadrant_6_hotspot,
+    #             quadrant_7_hotspot,
+    #             quadrant_8_hotspot]
+    # # plot all 9 center of mass findings (1 main and 8 corners)
+    # plot_3_by_n(raw_tuple, hotspots)
+    # # we can take a slice through the main cm and a few others just ot check it out
+    # # slice_2d = make_2d_funky(lucky_winner_raw_data, main_hotspot, quadrant_1_hotspot, quadrant_2_hotspot)
+    # # plt.imshow(slice_2d)
+    # # plt.show()
+
+    # need to find each individual object
+    # array_of_slices = ndimage.measurements.find_objects(lucky_winner_density_mask_erosion)
+
+    # for each_slice in array_of_slices:
+    points_of_interest = find_unique_objects(lucky_winner_density_mask_erosion)
+    for i in range(len(points_of_interest['area'])):
+        print(points_of_interest['coordinates'][i])
+        from preprocess import plot_3d
+        plot_3d(points_of_interest['raw'][i], 0)
 
