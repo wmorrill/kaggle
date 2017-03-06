@@ -374,7 +374,7 @@ def find_cm(raw, iterations=1, window_size=100, x=0, y=0, z=0):
     return x, y, z
 
 
-def find_unique_objects(mask, volume_min=800, volume_max=15000, ratio_min=1.5, ratio_max=4):
+def find_unique_objects(raw_data, mask, volume_min=800, volume_max=15000, ratio_min=1.5, ratio_max=4):
     """
     takes a mask and finds all the unique objects floating in that area
 
@@ -411,11 +411,14 @@ def find_unique_objects(mask, volume_min=800, volume_max=15000, ratio_min=1.5, r
         # get the surface area and volume of the object
         area = float(hull.area)
         volume = float(hull.volume)
-        # TODO: equate these arbitrary numbers to actual mm
+        # TODO: equate these arbitrary numbers to actual mm. look @ resample function in preprocess.py
         # if this object is within our interests, let's add it to the list
         if volume_min < volume < volume_max and ratio_min < (volume/area) < ratio_max:
             unique_blob_dict['coordinates'].append(find_cm(sub_mask, 1))
-            unique_blob_dict['raw'].append(sub_mask[top_left[0]:bottom_right[0]+1,
+            unique_blob_dict['mask'].append(sub_mask[top_left[0]:bottom_right[0]+1,
+                                                     top_left[1]:bottom_right[1]+1,
+                                                     top_left[2]:bottom_right[2]+1])
+            unique_blob_dict['raw'].append(raw_data[top_left[0]:bottom_right[0]+1,
                                                      top_left[1]:bottom_right[1]+1,
                                                      top_left[2]:bottom_right[2]+1])
             unique_blob_dict['volume'].append(volume)
@@ -426,9 +429,8 @@ def find_unique_objects(mask, volume_min=800, volume_max=15000, ratio_min=1.5, r
             print('Volume = %f' % unique_blob_dict['volume'][-1])
             print('Area = %f' % unique_blob_dict['area'][-1])
             print('Volume/Area = %f' % (float(unique_blob_dict['volume'][-1])/float(unique_blob_dict['area'][-1])))
-            #plot_3_by_n((mask, sub_mask),[unique_blob_dict['coordinates'][-1]])
+            #plot_3_by_n((raw_data, mask, sub_mask),[unique_blob_dict['coordinates'][-1]])
 
-            # from preprocess import plot_3d
             # plot_3d(lucky_winner_density_mask_erosion, 0)
         del sub_mask
         del hull
@@ -474,7 +476,7 @@ def get_mass_details(patient_raw_data, patient_mask_data):
     del patient_density_mask_dilation
 
     # find all the objects and get their details
-    points_of_interest = find_unique_objects(patient_density_mask_erosion)
+    points_of_interest = find_unique_objects(patient_raw_data, patient_density_mask_erosion)
     if debug:
         for i in range(len(points_of_interest['area'])):
             print(points_of_interest['coordinates'][i])
@@ -484,9 +486,30 @@ def get_mass_details(patient_raw_data, patient_mask_data):
 
 
 def get_lymph_node_details(patient_raw_data):
-    # TODO: find ou if the patient lymph nodes are swollen. This is apparently indicative of a problem
+    """
+    decide if the patient's lymph nodes are swollen
+
+    :param patient_raw_data: (np array) 3D array of density data
+    :return: (float) probability that they are swollen, 0 (def not), 1 (def are)
+    """
+    # TODO: find out if the patient lymph nodes are swollen. This is apparently indicative of a problem
     lymph_details = 1
     return lymph_details
+
+
+def is_mass_spiculated(raw, mask):
+    """
+    determine if the mass we found is spiculated, this is indicative of malignant tumor
+    from wiki:
+    In oncology, a spiculated mass is a lump of tissue with spikes or points on the surface.
+    It is suggestive but not diagnostic of malignancy, i.e. cancer.
+    It's a common mammography finding in carcinoma breast.
+
+    :param raw: (np array) 3d array of just the area around the mass
+    :return: (float) percentage chance the mass is spiculated 0 (def not), 1 (def yes)
+    """
+    # TODO: write method to find if mass is spiculated (has spikes)
+    return 1
 
 
 if __name__ == "__main__":
@@ -509,6 +532,9 @@ if __name__ == "__main__":
     del dict_of_masks
     print("done... Apply Mask Dilation")
     lucky_winner_masses = get_mass_details(lucky_winner_raw_data, lucky_winner_mask)
+    lucky_winner_masses['spiculated'] = []
+    for i, mass in lucky_winner_masses['raw']:
+        lucky_winner_masses['spiculated'].append(is_mass_spiculated(mass, lucky_winner_masses['mask']))
     lucky_winner_lymph_nodes = get_lymph_node_details(lucky_winner_raw_data)
 
 
