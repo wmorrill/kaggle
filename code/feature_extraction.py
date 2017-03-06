@@ -483,6 +483,12 @@ def get_mass_details(patient_raw_data, patient_mask_data):
     return points_of_interest
 
 
+def get_lymph_node_details(patient_raw_data):
+    # TODO: find ou if the patient lymph nodes are swollen. This is apparently indicative of a problem
+    lymph_details = 1
+    return lymph_details
+
+
 if __name__ == "__main__":
     raw_patients_file = 'C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\sample_patients_resampled.npz'
     patient_masks_file = 'C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\sample_patients_segmented.npz'
@@ -503,5 +509,6 @@ if __name__ == "__main__":
     del dict_of_masks
     print("done... Apply Mask Dilation")
     lucky_winner_masses = get_mass_details(lucky_winner_raw_data, lucky_winner_mask)
+    lucky_winner_lymph_nodes = get_lymph_node_details(lucky_winner_raw_data)
 
 
