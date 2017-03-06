@@ -209,7 +209,8 @@ def segment_lung_mask(image, fill_lung_structures=True):
     :param fill_lung_structures:
     :return:
     """
-    # # shrink image to get rid of threacheotomy
+    # TODO: Make this work on corner case: '0acbebb8d463b4b9ca88cf38431aac69'
+    # # shrink image to get rid of threacheotomy? doesnt work.
     # # z, y, x = image.shape
     # shrink = 20
     # image_shrink = image[shrink:-shrink,shrink:-shrink,shrink:-shrink]
