@@ -9,6 +9,7 @@ from skimage import measure, morphology, segmentation
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import tensorflow as tf
 import multiprocessing
+import time
 
 # Some constants
 INPUT_FOLDER = 'C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\Sample_data\\'
@@ -68,6 +69,7 @@ def get_pixels_hu(scans):
     return np.array(image, dtype=np.int16)
 
 def resample(image, scan, new_spacing=[1,1,1]):
+    print("resampling image size, starting at {}".format(image.shape))
     # Determine current pixel spacing
     spacing = map(float, ([scan[0].SliceThickness] + scan[0].PixelSpacing))
     spacing = np.array(list(spacing))
@@ -80,8 +82,31 @@ def resample(image, scan, new_spacing=[1,1,1]):
     new_spacing = spacing / real_resize_factor
 
     image = ndimage.interpolation.zoom(image, real_resize_factor)
-
+    print("Done resampling, new size {}".format(image.shape))
     return image, new_spacing
+
+def resample_tf(image, scan):
+    print("resampling image size, starting at {}".format(image.shape))
+    # Determine current pixel spacing
+    spacing = map(float, ([scan[0].SliceThickness] + scan[0].PixelSpacing))
+    spacing = np.array(list(spacing))
+    #don't want to loose data, so let's go with the smallest current spacing
+    new_spacing = [min(spacing),min(spacing),min(spacing)]
+    resize_factor = spacing / new_spacing
+    new_real_shape = image.shape * resize_factor
+    new_shape = np.round(new_real_shape)
+    print(new_shape)
+    session = tf.Session()
+    size = (tf.cast(new_shape[0], tf.int32), tf.cast(new_shape[1], tf.int32))
+    # images = [image[:,:,i] for i in range(len(image[0][0]))]
+    image_t = tf.transpose(image, perm=[1,0,2], name='First_Tranpose')
+    image_t_4d = tf.expand_dims(image_t, 3, name='expand')
+    resized_image_t_4d = tf.image.resize_bicubic(image_t_4d, size, name='Resample')
+    resized_image_t = tf.squeeze(resized_image_t_4d, name='Squeeze')
+    resized_image = session.run(tf.transpose(resized_image_t, perm=[1,0,2], name='Second_Tranpose'))
+    session.close()
+    print("Done resampling, new size {}".format(resized_image.shape))
+    return resized_image
 
 def plot_3d(image, threshold=-300):
 
@@ -209,6 +234,7 @@ def segment_lung_mask(image, fill_lung_structures=True):
     :param fill_lung_structures:
     :return:
     """
+    print("Creating Lung Mask")
     # TODO: Make this work on corner case: '0acbebb8d463b4b9ca88cf38431aac69'
     # # shrink image to get rid of threacheotomy? doesnt work.
     # # z, y, x = image.shape
@@ -221,7 +247,7 @@ def segment_lung_mask(image, fill_lung_structures=True):
     # plt.show()
     # not actually binary, but 1 and 2.
     # 0 is treated as background, which we do not want
-    binary_image = np.array(image > -320, dtype=np.int8+1)
+    binary_image = np.array(image < -320, dtype=np.int8)
     # dilated = scipy.ndimage.binary_dilation(binary_image, iterations=20).astype(binary_image.dtype)
     # binary_image = scipy.ndimage.binary_erosion(dilated, iterations=20).astype(binary_image.dtype)
     labels = measure.label(binary_image)
@@ -230,46 +256,56 @@ def segment_lung_mask(image, fill_lung_structures=True):
     #   Improvement: Pick multiple background labels from around the patient
     #   More resistant to "trays" on which the patient lays cutting the air
     #   around the person in half
-    background_label = []
-    background_label.append(labels[0,0,0])
-    # background_label.append(labels[-1,0,0])
-    # background_label.append(labels[-1,-1,0])
-    # background_label.append(labels[-1,-1,-1])
-    # background_label.append(labels[0,-1,0])
-    # background_label.append(labels[0,-1,-1])
-    # background_label.append(labels[0,0,-1])
-    # background_label.append(labels[-1,0,-1])
-    background_set = set(background_label)
+    # background_label = []
+    # background_label.append(labels[0,0,0])
+    # # background_label.append(labels[-1,0,0])
+    # # background_label.append(labels[-1,-1,0])
+    # # background_label.append(labels[-1,-1,-1])
+    # # background_label.append(labels[0,-1,0])
+    # # background_label.append(labels[0,-1,-1])
+    # # background_label.append(labels[0,0,-1])
+    # # background_label.append(labels[-1,0,-1])
+    # background_set = set(background_label)
 
-    #Fill the air around the person
-    for value in background_set:
-        binary_image[value == labels] = 0
+    # #Fill the air around the person
+    # for value in background_set:
+    #     binary_image[value == labels] = 0
         # print(value)
         # plt.imshow(binary_image[80])
         # plt.show()
 
+    # binary_image = 1-binary_image # Invert it, lungs are now 0
+    labels = measure.label(binary_image)
+    unique, counts = np.unique(labels, return_counts=True)
+    label_dict = dict(zip(unique, counts))
+    little_chunks = [label_value for label_value in label_dict.keys() if label_dict[label_value] < 90000]
+    # binary_image = 1-binary_image # Invert it, lungs are now 1
+    for each_value in little_chunks:
+        binary_image[labels == each_value] = 1
+    # plt.imshow(binary_image[264], cmap=plt.cm.gray)
+    # plt.show()
     # Method of filling the lung structures (that is superior to something like
     # morphological closing)
-    if fill_lung_structures:
-        # For every slice we determine the largest solid structure
-        for i, axial_slice in enumerate(binary_image):
-            axial_slice = axial_slice - 1
-            labeling = measure.label(axial_slice)
-            l_max = largest_label_volume(labeling, bg=0)
-
-            if l_max is not None: #This slice contains some lung
-                binary_image[i][labeling != l_max] = 1
-
-
-    binary_image -= 1 #Make the image actual binary
-    binary_image = 1-binary_image # Invert it, lungs are now 1
-
-    # Remove other air pockets inside body
-    labels = measure.label(binary_image, background=0)
-    l_max = largest_label_volume(labels, bg=0)
-    if l_max is not None: # There are air pockets
-        binary_image[labels != l_max] = 0
-
+    # if fill_lung_structures:
+    #     # For every slice we determine the largest solid structure
+    #     for i, axial_slice in enumerate(binary_image):
+    #         axial_slice = axial_slice - 1
+    #         labeling = measure.label(axial_slice)
+    #         l_max = largest_label_volume(labeling, bg=0)
+    #
+    #         if l_max is not None: #This slice contains some lung
+    #             binary_image[i][labeling != l_max] = 1
+    #
+    #
+    # binary_image -= 1 #Make the image actual binary
+    # binary_image = 1-binary_image # Invert it, lungs are now 1
+    #
+    # # Remove other air pockets inside body
+    # labels = measure.label(binary_image, background=0)
+    # l_max = largest_label_volume(labels, bg=0)
+    # if l_max is not None: # There are air pockets
+    #     binary_image[labels != l_max] = 0
+    print("Done generating mask")
     return binary_image
 
 
@@ -281,7 +317,9 @@ def store_patients(file, img):
 
 
 def load_patients(file):
+    print("Loading Patient {}".format(file))
     patients = np.load(file)
+    print("Done Loading")
     return patients
 
 
@@ -350,15 +388,18 @@ if __name__ == '__main__':
     # # Show some slice in the middle
     # plt.imshow(first_patient_pixels[80], cmap=plt.cm.gray)
     # plt.show()
+    t0 = time.clock()
+    pix_resampled = resample_tf(first_patient_pixels, first_patient)
+    print("took {} seconds to resample using GPU".format(time.clock()-t0))
+    t0 = time.clock()
+    pix_resampled, spacing = resample(first_patient_pixels, first_patient)
+    print("took {} seconds to resample using CPU".format(time.clock()-t0))
 
-    pix_resampled, spacing = resample(first_patient_pixels, first_patient, [1,1,1])
-    print("Shape before resampling\t", first_patient_pixels.shape)
-    print("Shape after resampling\t", pix_resampled.shape)
     #
     # # plot_3d(pix_resampled, 400)  # This takes forever
     #
     # segmented_lungs = segment_lung_mask(pix_resampled, False)
-    # segmented_lungs_fill = segment_lung_mask(pix_resampled, True)
+    segmented_lungs_fill = segment_lung_mask(pix_resampled, True)
 
     # # multiprocessing took 40 mins
     # manager = multiprocessing.Manager()
@@ -370,17 +411,17 @@ if __name__ == '__main__':
     # plt.imshow(segmented_lungs_fill[80], cmap=plt.cm.gray)
     # plt.show()
     # # series processing also took 40 mins...
-    segmented_lungs_fill = list([None] * len(pix_resampled))
-    for i in range(len(pix_resampled)):
-        segmented_lungs_fill[i] = separate_lungs(pix_resampled[i])
-    print("%s - Preprocess End" % datetime.datetime.now())
+    # segmented_lungs_fill = list([None] * len(pix_resampled))
+    # for i in range(len(pix_resampled)):
+    #     segmented_lungs_fill[i] = separate_lungs(pix_resampled[i])
+    # print("%s - Preprocess End" % datetime.datetime.now())
     plt.imshow(segmented_lungs_fill[264], cmap=plt.cm.gray)
     plt.show()
     # TODO: figure out how to speed this up? Maybe re-write seperate_lungs() function using tf
 
     # store_patients("C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\one_patient_segmented", segmented_lungs_fill)
     # # plot_3d(segmented_lungs, 0)
-    # TODO: figure out why this fails (TypeError?)
-    plot_3d(segmented_lungs_fill, 0)
+    # # TODO: figure out why this fails (TypeError?)
+    # plot_3d(segmented_lungs_fill, 0)
     # plot_3d(segmented_lungs_fill - segmented_lungs, 0)
 
