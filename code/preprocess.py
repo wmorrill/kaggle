@@ -101,7 +101,8 @@ def resample_tf(image, scan):
     # images = [image[:,:,i] for i in range(len(image[0][0]))]
     image_t = tf.transpose(image, perm=[1,0,2], name='First_Tranpose')
     image_t_4d = tf.expand_dims(image_t, 3, name='expand')
-    resized_image_t_4d = tf.image.resize_bicubic(image_t_4d, size, name='Resample')
+    # resized_image_t_4d = tf.image.resize_bicubic(image_t_4d, size, name='Resample')
+    resized_image_t_4d = tf.image.resize_bilinear(image_t_4d, size, name='Resample')
     resized_image_t = tf.squeeze(resized_image_t_4d, name='Squeeze')
     resized_image = session.run(tf.transpose(resized_image_t, perm=[1,0,2], name='Second_Tranpose'))
     session.close()
@@ -325,7 +326,7 @@ def load_patients(file):
 
 def get_meta_data(scan):
     # TODO: get meta-data from Dicom that might be useful for feature extraction
-    meta_dict = []
+    meta_dict = {}
     # get slice thickness
     meta_dict['slice_thickness'] = scan[0].SliceThickness
     # get pixel spacing in mm
