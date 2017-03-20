@@ -85,12 +85,12 @@ def apply_mask(image_array, mask_array):
     :return: (numpy 3D array) masked image
     """
     session = tf.Session()
-    masked_image_array = session.run(tf.pow(image_array, mask_array))
+    masked_image_array = tf.pow(tf.cast(image_array, tf.int32), tf.cast(mask_array, tf.int32))
     # print("masked")
     zero = tf.constant(0, tf.int32)
     air = tf.constant(-1000, tf.int32)
     # print("constants made")
-    offset = session.run(tf.multiply(air, tf.cast(tf.equal(mask_array, zero), tf.int32)))
+    offset = tf.multiply(air, tf.cast(tf.equal(tf.cast(mask_array, tf.int32), zero), tf.int32))
     # print("offset")
     sum_mask = session.run(tf.add(masked_image_array, offset))
     # print("summed")
@@ -374,10 +374,11 @@ def find_cm(raw, iterations=1, window_size=100, x=0, y=0, z=0):
     return x, y, z
 
 
-def find_unique_objects(raw_data, mask, volume_min=800, volume_max=15000, ratio_min=1.5, ratio_max=4):
+def find_unique_objects(raw_data, mask, volume_min=300, volume_max=15000, ratio_min=1.2, ratio_max=3):
     """
     takes a mask and finds all the unique objects floating in that area
 
+    :param raw_data: (np array) 3d binary image
     :param mask: (np array) 3d binary image
     :param volume_min: (int) smallest acceptable volume
     :param volume_max: (int) largest acceptable volume
@@ -389,38 +390,79 @@ def find_unique_objects(raw_data, mask, volume_min=800, volume_max=15000, ratio_
     # get all the individual objects
     labeled_data, num_of_unique_blobs = label(mask, background=0, return_num=True)
     print("found %d unique objects" % num_of_unique_blobs)
-    unique_blob_dict = {'coordinates':[], 'volume':[], 'area':[], 'raw':[]}
+    # how many of each value exist
+    bin_count = np.bincount(labeled_data.flat)
+    # list of blobs bigger than some size
+    big_blobs = [x for x in range(1,num_of_unique_blobs) if volume_max > bin_count[x] > volume_min]
+    print("found %d unique BIG objects" % len(big_blobs))
+    unique_blob_dict = {'coordinates':[], 'volume':[], 'area':[], 'raw':[], 'mask':[]}
     # go through the objects and check if they are interesting
-    for i in range(1,num_of_unique_blobs):
-        # clears memory
-        tf.reset_default_graph()
-        # label gives each unique object a numeric value, so we sort based on that
-        search_value = tf.constant(i, tf.int64)
-        session = tf.Session()
+    for i in big_blobs:
         # generate a mask that only has the one object in it
-        sub_mask = session.run(tf.equal(labeled_data, search_value))
-        session.close()
+        # session = tf.Session()
+        # # # clears memory
+        # # tf.reset_default_graph()
+        # sub_mask = session.run(tf.equal(labeled_data, tf.constant(i, tf.int64)))
+        # session.close()
+        sub_mask = np.array(labeled_data == i)
         # get the bounding coordinates for this object
         coords = np.argwhere(sub_mask)
-        # expand the coords to some standard size (30, 30, 30) or (50, 50, 50)
         # TODO: make coordinates and raw return a consistent size (easier for cnn later)
+        original_size = raw_data.shape
         top_left = coords.min(axis=0)
         bottom_right = coords.max(axis=0)
+        # expand the coords to some standard size (50, 50, 50)
+        desired_box = (50, 50, 50)  # 2.5cm cube
+        bounding_box = (bottom_right[0]-top_left[0], bottom_right[1]-top_left[1], bottom_right[2]-top_left[2])
+        delta_box = np.subtract(desired_box, bounding_box)
+        half_delta = [int(x/2) for x in delta_box]
+        top_left = np.subtract(top_left, half_delta)
+        bottom_right = np.add(top_left, desired_box)
+        if top_left[0] < 0:
+            bottom_right[0] -= top_left[0]
+            top_left[0] = 0
+        if top_left[1] < 0:
+            bottom_right[1] -= top_left[1]
+            top_left[1] = 0
+        if top_left[2] < 0:
+            bottom_right[2] -= top_left[2]
+            top_left[2] = 0
+        if bottom_right[0] > original_size[0]:
+            top_left[0] -= bottom_right[0] - original_size[0]
+            bottom_right[0] = original_size[0]
+        if bottom_right[1] > original_size[1]:
+            top_left[1] -= bottom_right[1] - original_size[1]
+            bottom_right[1] = original_size[0]
+        if bottom_right[2] > original_size[2]:
+            top_left[2] -= bottom_right[2] - original_size[2]
+            bottom_right[2] = original_size[2]
         # calculate the convex hull for this 3d object
-        hull = spatial.ConvexHull(coords,3)
+        hull = spatial.ConvexHull(coords, 3)
         # get the surface area and volume of the object
         area = float(hull.area)
         volume = float(hull.volume)
+        effective_r = np.sqrt(area/(4*np.pi))
+        expected_volume = effective_r * area / 3
+
+        # # troubleshooting
+        # print('Volume = %f' % volume)
+        # print('Area = %f' % area)
+        # print('Expected Volume= %f' % expected_volume)
+        # print('Volume Ratio (real/exp)= %f' % (volume/expected_volume))
+        # plot_3d(sub_mask, 0)
+
         # TODO: equate these arbitrary numbers to actual mm. look @ resample function in preprocess.py
         # if this object is within our interests, let's add it to the list
-        if volume_min < volume < volume_max and ratio_min < (volume/area) < ratio_max:
+        # if volume_min < volume < volume_max and ratio_min < (volume/area) < ratio_max:
+        # if ratio_min < (volume/area) < ratio_max:
+        if volume/expected_volume > 0.76:
             unique_blob_dict['coordinates'].append(find_cm(sub_mask, 1))
-            unique_blob_dict['mask'].append(sub_mask[top_left[0]:bottom_right[0]+1,
-                                                     top_left[1]:bottom_right[1]+1,
-                                                     top_left[2]:bottom_right[2]+1])
-            unique_blob_dict['raw'].append(raw_data[top_left[0]:bottom_right[0]+1,
-                                                     top_left[1]:bottom_right[1]+1,
-                                                     top_left[2]:bottom_right[2]+1])
+            unique_blob_dict['mask'].append(sub_mask[top_left[0]:bottom_right[0],
+                                                     top_left[1]:bottom_right[1],
+                                                     top_left[2]:bottom_right[2]])
+            unique_blob_dict['raw'].append(raw_data[top_left[0]:bottom_right[0],
+                                                     top_left[1]:bottom_right[1],
+                                                     top_left[2]:bottom_right[2]])
             unique_blob_dict['volume'].append(volume)
             unique_blob_dict['area'].append(area)
 
@@ -428,7 +470,8 @@ def find_unique_objects(raw_data, mask, volume_min=800, volume_max=15000, ratio_
             # for testing purposes
             print('Volume = %f' % unique_blob_dict['volume'][-1])
             print('Area = %f' % unique_blob_dict['area'][-1])
-            print('Volume/Area = %f' % (float(unique_blob_dict['volume'][-1])/float(unique_blob_dict['area'][-1])))
+            print('Expected Volume= %f' % expected_volume)
+            print('Volume Ratio (real/exp)= %f' % (unique_blob_dict['volume'][-1]/expected_volume))
             #plot_3_by_n((raw_data, mask, sub_mask),[unique_blob_dict['coordinates'][-1]])
 
             # plot_3d(lucky_winner_density_mask_erosion, 0)
@@ -446,41 +489,62 @@ def find_unique_objects(raw_data, mask, volume_min=800, volume_max=15000, ratio_
         # Area = 2178.180552
         # Volume/Area = 3.747011
 
-
     return unique_blob_dict
 
 
 def get_mass_details(patient_raw_data, patient_mask_data):
-    debug = True
-    # dilate (expand) the mask to get all the little nodules and whatnot
-    patient_mask_dilation = mask_dilation(patient_mask_data, 6)
-    print("done... getting masked data")
-    # apply mask to raw data
-    patient_masked_data = apply_mask(patient_raw_data, patient_mask_dilation)
-    print("done... getting density mask")
-    # get new mask from density details in raw data
-    patient_density_mask = density_mask(patient_masked_data, -50, 100)
-    print("done... dilating density mask")
-    # dilate (expand) the mask to smooth
-    patient_density_mask_dilation = mask_dilation(patient_density_mask, 3)
-    print("done... erode density mask")
-    # # try to get rid of veins and keep only blobs
-    patient_density_mask_erosion = mask_erosion(patient_density_mask_dilation, 1)
-    print("done... plotting...")
-    if debug:
-        plot_3_by_n((patient_masked_data, patient_density_mask_dilation, patient_density_mask_erosion))
+    debug = False
+    # # dilate (expand) the mask to get all the little nodules and whatnot
+    # patient_mask_dilation = mask_dilation(patient_mask_data, 6)
+    # print("done... getting masked data")
+    # # apply mask to raw data
+    # patient_masked_data = apply_mask(patient_raw_data, patient_mask_dilation)
+    # print("done... getting density mask")
+    # # get new mask from density details in raw data
+    # patient_density_mask = density_mask(patient_masked_data, -50, 100)
+    # print("done... dilating density mask")
+    # # dilate (expand) the mask to smooth
+    # patient_density_mask_dilation = mask_dilation(patient_density_mask, 3)
+    # print("done... erode density mask")
+    # # # try to get rid of veins and keep only blobs
+    # patient_density_mask_erosion = mask_erosion(patient_density_mask_dilation, 1)
+    # print("done... plotting...")
 
-    del mask_dilation
-    del patient_masked_data
-    del patient_density_mask
-    del patient_density_mask_dilation
+    # mask dilation
+    dilated = ndimage.binary_dilation(patient_mask_data, iterations=6).astype(patient_mask_data.dtype)
+    erosion = ndimage.binary_erosion(dilated, iterations=6).astype(patient_mask_data.dtype)
+    # apply mask
+    session = tf.Session()
+    masked_image_array = tf.pow(tf.cast(patient_raw_data, tf.int32), tf.cast(erosion, tf.int32))
+    zero = tf.constant(0, tf.int32)
+    air = tf.constant(-1000, tf.int32)
+    offset = tf.multiply(air, tf.cast(tf.equal(tf.cast(erosion, tf.int32), zero), tf.int32))
+    sum_mask = tf.add(masked_image_array, offset)
+    # get new mask from density
+    limit = np.full_like(sum_mask, 100)
+    adjustment = np.full_like(sum_mask, -50)
+    mask = session.run(tf.less(tf.abs(tf.subtract(sum_mask, adjustment)), limit))
+    session.close()
+    # dilate density mask
+    patient_density_mask_dilation = ndimage.binary_dilation(mask, iterations=3).astype(mask.dtype)
+    patient_density_mask_erosion = ndimage.binary_erosion(patient_density_mask_dilation, iterations=3).astype(mask.dtype)
+
+    if debug:
+        plot_3_by_n((patient_raw_data, patient_density_mask_erosion))
+
+    # del patient_mask_dilation
+    # del patient_masked_data
+    # del patient_density_mask
+    # del patient_density_mask_dilation
 
     # find all the objects and get their details
     points_of_interest = find_unique_objects(patient_raw_data, patient_density_mask_erosion)
-    if debug:
+    if debug or 1:
+        print("Found {} masses".format(len(points_of_interest['area'])))
         for i in range(len(points_of_interest['area'])):
             print(points_of_interest['coordinates'][i])
-            plot_3d(points_of_interest['raw'][i], 0)
+            plot_3_by_n((points_of_interest['raw'][i], points_of_interest['mask'][i]), [(25,25,25)])
+            plot_3d(points_of_interest['mask'][i], 0)
 
     return points_of_interest
 
@@ -508,8 +572,21 @@ def is_mass_spiculated(raw, mask):
     :param raw: (np array) 3d array of just the area around the mass
     :return: (float) percentage chance the mass is spiculated 0 (def not), 1 (def yes)
     """
-    # TODO: write method to find if mass is spiculated (has spikes)
-    return 1
+    new_threshold = np.array(raw > -402, dtype=np.int32)
+    session = tf.Session()
+    # eroded_mask = ndimage.binary_erosion(mask, iterations=1).astype(mask.dtype)
+    eroded_mask = mask_erosion(mask, 3)
+    # subtracted = session.run(tf.subtract(mask, eroded_mask))
+    # session.close()
+    subtracted = np.subtract(mask, eroded_mask)
+    new_array, num_objects = label(subtracted, background=0, return_num=True)
+    print(num_objects)
+    if 1 or num_objects > 10:
+        plot_3d(raw, -402)
+        plot_3d(mask, 0)
+        plot_3d(subtracted, 0)
+        return 1
+    return -1
 
 
 if __name__ == "__main__":
@@ -521,6 +598,7 @@ if __name__ == "__main__":
     dict_of_masks = load_data(patient_masks_file)
     print("all patients loaded")
     lucky_winner = None
+    # lucky_winner = '0c37613214faddf8701ca41e6d43f56e'
     while lucky_winner not in dict_of_patients:
         lucky_winner = random_patient_with_cancer(source_of_truth)
     print("Winner chosen at random: ", end='')
@@ -533,8 +611,7 @@ if __name__ == "__main__":
     print("done... Apply Mask Dilation")
     lucky_winner_masses = get_mass_details(lucky_winner_raw_data, lucky_winner_mask)
     lucky_winner_masses['spiculated'] = []
-    for i, mass in lucky_winner_masses['raw']:
-        lucky_winner_masses['spiculated'].append(is_mass_spiculated(mass, lucky_winner_masses['mask']))
-    lucky_winner_lymph_nodes = get_lymph_node_details(lucky_winner_raw_data)
+    for i, mass in enumerate(lucky_winner_masses['raw']):
+        lucky_winner_masses['spiculated'].append(is_mass_spiculated(mass, lucky_winner_masses['mask'][i]))
 
 
