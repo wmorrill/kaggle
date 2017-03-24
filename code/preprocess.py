@@ -249,6 +249,7 @@ def segment_lung_mask(image, fill_lung_structures=True):
     # not actually binary, but 1 and 2.
     # 0 is treated as background, which we do not want
     binary_image = np.array(image < -320, dtype=np.int8)
+    binary_image2 = np.array(image < -320, dtype=np.int8)
     # dilated = scipy.ndimage.binary_dilation(binary_image, iterations=20).astype(binary_image.dtype)
     # binary_image = scipy.ndimage.binary_erosion(dilated, iterations=20).astype(binary_image.dtype)
     labels = measure.label(binary_image)
@@ -285,6 +286,50 @@ def segment_lung_mask(image, fill_lung_structures=True):
         binary_image[labels == each_value] = 1
     # plt.imshow(binary_image[264], cmap=plt.cm.gray)
     # plt.show()
+
+    # slice into 3's vertically and check to see if any of the labels touch more than 1 edge
+    width = len(labels[0][0])
+
+    left = binary_image[:, :, :int(width/3)]
+    center = binary_image[:, :, int(width/3):int(width*2/3)]
+    right = binary_image[:, :, int(width*2/3):]
+    # plt.imshow(left[264], cmap=plt.cm.gray)
+    # plt.show()
+    # plt.imshow(center[264], cmap=plt.cm.gray)
+    # plt.show()
+    # plt.imshow(right[264], cmap=plt.cm.gray)
+    # plt.show()
+    left_labels = measure.label(left)
+    top_slice = left_labels[0]
+    bottom_slice = left_labels[-1]
+    top_values = np.unique(top_slice)
+    bottom_values = np.unique(bottom_slice)
+    for each_value in (set(top_values) & set(bottom_values)):
+        left[left_labels == each_value] = 0
+    # plt.imshow(left[264], cmap=plt.cm.gray)
+    # plt.show()
+    center_labels = measure.label(center)
+    top_slice = center_labels[0]
+    bottom_slice = center_labels[-1]
+    top_values = np.unique(top_slice)
+    bottom_values = np.unique(bottom_slice)
+    for each_value in (set(top_values) & set(bottom_values)):
+        center[center_labels == each_value] = 0
+    # plt.imshow(center[264], cmap=plt.cm.gray)
+    # plt.show()
+    right_labels = measure.label(right)
+    top_slice = right_labels[0]
+    bottom_slice = right_labels[-1]
+    top_values = np.unique(top_slice)
+    bottom_values = np.unique(bottom_slice)
+    for each_value in (set(top_values) & set(bottom_values)):
+        right[right_labels == each_value] = 0
+    # plt.imshow(right[264], cmap=plt.cm.gray)
+    # plt.show()
+    total = np.dstack([left,center,right])
+    # plt.imshow(total[264], cmap=plt.cm.gray)
+    # plt.show()
+
     # Method of filling the lung structures (that is superior to something like
     # morphological closing)
     # if fill_lung_structures:
@@ -307,7 +352,7 @@ def segment_lung_mask(image, fill_lung_structures=True):
     # if l_max is not None: # There are air pockets
     #     binary_image[labels != l_max] = 0
     print("Done generating mask")
-    return binary_image
+    return total
 
 
 def store_patients(file, img):

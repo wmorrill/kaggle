@@ -395,7 +395,7 @@ def find_unique_objects(raw_data, mask, volume_min=300, volume_max=15000, ratio_
     # list of blobs bigger than some size
     big_blobs = [x for x in range(1,num_of_unique_blobs) if volume_max > bin_count[x] > volume_min]
     print("found %d unique BIG objects" % len(big_blobs))
-    unique_blob_dict = {'coordinates':[], 'volume':[], 'area':[], 'raw':[], 'mask':[]}
+    unique_blob_dict = {'coordinates':[], 'volume':[], 'area':[], 'raw':[], 'mask':[], 'spiculated':[]}
     # go through the objects and check if they are interesting
     for i in big_blobs:
         # generate a mask that only has the one object in it
@@ -465,6 +465,7 @@ def find_unique_objects(raw_data, mask, volume_min=300, volume_max=15000, ratio_
                                                      top_left[2]:bottom_right[2]])
             unique_blob_dict['volume'].append(volume)
             unique_blob_dict['area'].append(area)
+            unique_blob_dict['spiculated'].append(is_mass_spiculated(unique_blob_dict['raw'][-1], unique_blob_dict['mask'][-1]))
 
 
             # for testing purposes
@@ -472,7 +473,8 @@ def find_unique_objects(raw_data, mask, volume_min=300, volume_max=15000, ratio_
             print('Area = %f' % unique_blob_dict['area'][-1])
             print('Expected Volume= %f' % expected_volume)
             print('Volume Ratio (real/exp)= %f' % (unique_blob_dict['volume'][-1]/expected_volume))
-            #plot_3_by_n((raw_data, mask, sub_mask),[unique_blob_dict['coordinates'][-1]])
+            print('Spiculated: {}'.format(unique_blob_dict['spiculated'][-1]))
+            plot_3_by_n((raw_data, mask, sub_mask),[unique_blob_dict['coordinates'][-1]])
 
             # plot_3d(lucky_winner_density_mask_erosion, 0)
         del sub_mask
@@ -528,6 +530,7 @@ def get_mass_details(patient_raw_data, patient_mask_data):
     # dilate density mask
     patient_density_mask_dilation = ndimage.binary_dilation(mask, iterations=3).astype(mask.dtype)
     patient_density_mask_erosion = ndimage.binary_erosion(patient_density_mask_dilation, iterations=3).astype(mask.dtype)
+    plot_3_by_n((patient_raw_data, patient_density_mask_erosion))
 
     if debug:
         plot_3_by_n((patient_raw_data, patient_density_mask_erosion))
@@ -539,8 +542,8 @@ def get_mass_details(patient_raw_data, patient_mask_data):
 
     # find all the objects and get their details
     points_of_interest = find_unique_objects(patient_raw_data, patient_density_mask_erosion)
-    if debug or 1:
-        print("Found {} masses".format(len(points_of_interest['area'])))
+    print("Found {} masses".format(len(points_of_interest['area'])))
+    if debug:
         for i in range(len(points_of_interest['area'])):
             print(points_of_interest['coordinates'][i])
             plot_3_by_n((points_of_interest['raw'][i], points_of_interest['mask'][i]), [(25,25,25)])
