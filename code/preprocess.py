@@ -12,9 +12,6 @@ import multiprocessing
 import time
 
 # Some constants
-INPUT_FOLDER = 'C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\Sample_data\\'
-patients = os.listdir(INPUT_FOLDER)
-patients.sort()
 
 # HU Table upper limit
 AIR = -1000
@@ -382,6 +379,9 @@ def get_meta_data(scan):
 
 
 if __name__ == '__main__':
+    INPUT_FOLDER = 'C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\Sample_data\\'
+    patients = os.listdir(INPUT_FOLDER)
+    patients.sort()
     save_all = False
     save_raw = False
     save_resampled = False

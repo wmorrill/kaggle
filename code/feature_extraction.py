@@ -478,11 +478,16 @@ def find_unique_objects(raw_data, mask, volume_min=300, volume_max=15000, scale=
                         [temp_dict['coordinates']],
                         save=True,
                         save_name=save_name+"_"+ str(i))
+            plot_3_by_n((temp_dict['raw'], temp_dict['mask']),
+                        [(25, 25, 25)],
+                        save=True,
+                        save_name=save_name+"_mass_"+ str(i))
 
             # plot_3d(lucky_winner_density_mask_erosion, 0)
         del sub_mask
         del hull
         del coords
+        del temp_dict
 
         # probably tumor
         # Volume = 1262.166667
@@ -590,7 +595,7 @@ def get_mass_details(patient_raw_data, patient_mask_data, scale=1, save_name='')
                                              patient_density_mask_erosion,
                                              scale=scale,
                                              save_name=save_name)
-    print("Found {} masses".format(len(points_of_interest['area'])))
+    # print("Found {} masses".format(len(points_of_interest['area'])))
     if debug:
         for i in range(len(points_of_interest['area'])):
             print(points_of_interest['coordinates'][i])
@@ -633,9 +638,9 @@ def is_mass_spiculated(raw, mask):
     new_array, num_objects = label(subtracted, background=0, return_num=True)
     print(num_objects)
     if 1 or num_objects > 10:
-        plot_3d(raw, -402)
-        plot_3d(mask, 0)
-        plot_3d(subtracted, 0)
+        # plot_3d(raw, -402)
+        # plot_3d(mask, 0)
+        # plot_3d(subtracted, 0)
         return 1
     return -1
 

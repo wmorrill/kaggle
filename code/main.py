@@ -1,16 +1,23 @@
 __author__ = 'wmorrill'
 
-from preprocess import *
-from feature_extraction import *
 import os
 import csv
+import time
+from preprocess import segment_lung_mask, resample_tf, get_pixels_hu, load_scan, get_meta_data
+from feature_extraction import get_mass_details
+from datetime import datetime
 
-INPUT_FOLDER = 'C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\Sample_data\\'
+# INPUT_FOLDER = 'C:\\GIT\\kaggle_data_science_bowl_2017\\Data\\Sample_data\\'
+INPUT_FOLDER = 'D:\\kaggle_data\\stage1\\'
 save_path = '\\'.join(INPUT_FOLDER.split('\\')[:-2])+'\\output\\'
 print(save_path)
 patients = os.listdir(INPUT_FOLDER)
-patients = ['0acbebb8d463b4b9ca88cf38431aac69']
+patients = patients[2:]
+# patients = ['0acbebb8d463b4b9ca88cf38431aac69']
+# patients = ['003f41c78e6acfa92430a057ac0b306e']  # this one takes forever to segment
 for patient in patients:
+    # print(datetime.now())
+    t0 = time.clock()
     print(patient)
     patient_dicom = load_scan(INPUT_FOLDER + patient)
     patient_data = get_pixels_hu(patient_dicom)
@@ -24,8 +31,12 @@ for patient in patients:
                               patient_lungs_mask,
                               scale=scaling_factor,
                               save_name=save_path+patient)
-    with open(save_path+patient) as csvfile:
-        fieldnames = list(masses[0].keys())
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(masses)
+    dialect = csv.excel()
+    dialect.lineterminator = '\n'
+    f = open(save_path+patient+".csv", 'a')
+    writer = csv.DictWriter(f, list(masses[0].keys()), 'NaN', extrasaction='ignore', dialect=dialect)
+    # writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(masses)
+    f.close()
+    print("time to process: {}".format(time.clock()-t0))
