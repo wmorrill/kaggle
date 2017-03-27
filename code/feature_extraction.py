@@ -453,17 +453,17 @@ def find_unique_objects(raw_data, mask, volume_min=300, volume_max=15000, scale=
         thickness = find_hull_max(hull)*scale
         #volume/expected volume > 0.72 is a pretty good threshold for sphere-like things
         temp_dict = {}
-        temp_dict['coordinates'].append(find_cm(sub_mask, 1))
-        temp_dict['mask'].append(sub_mask[top_left[0]:bottom_right[0],
+        temp_dict['coordinates']=(find_cm(sub_mask, 1))
+        temp_dict['mask']=(sub_mask[top_left[0]:bottom_right[0],
                                                  top_left[1]:bottom_right[1],
                                                  top_left[2]:bottom_right[2]])
-        temp_dict['raw'].append(raw_data[top_left[0]:bottom_right[0],
+        temp_dict['raw']=(raw_data[top_left[0]:bottom_right[0],
                                                  top_left[1]:bottom_right[1],
                                                  top_left[2]:bottom_right[2]])
-        temp_dict['volume'].append(volume)
-        temp_dict['area'].append(area)
-        temp_dict['spiculated'].append(is_mass_spiculated(unique_blob_dict['raw'][-1], unique_blob_dict['mask'][-1]))
-        temp_dict['thickness'].append(thickness)
+        temp_dict['volume']=(volume)
+        temp_dict['area']=(area)
+        temp_dict['spiculated']=(is_mass_spiculated(unique_blob_dict['raw'][-1], unique_blob_dict['mask'][-1]))
+        temp_dict['thickness']=(thickness)
         unique_blobs.append(temp_dict)
 
         # for testing purposes
