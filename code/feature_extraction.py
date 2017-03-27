@@ -462,7 +462,7 @@ def find_unique_objects(raw_data, mask, volume_min=300, volume_max=15000, scale=
                                                  top_left[2]:bottom_right[2]])
         temp_dict['volume']=(volume)
         temp_dict['area']=(area)
-        temp_dict['spiculated']=(is_mass_spiculated(unique_blob_dict['raw'][-1], unique_blob_dict['mask'][-1]))
+        temp_dict['spiculated']=(is_mass_spiculated(temp_dict['raw'][-1], temp_dict['mask'][-1]))
         temp_dict['thickness']=(thickness)
         unique_blobs.append(temp_dict)
 
