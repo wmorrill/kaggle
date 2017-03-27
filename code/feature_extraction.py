@@ -23,6 +23,7 @@ from scipy import ndimage
 from scipy import spatial
 from skimage.measure import label
 from preprocess import plot_3d
+from operator import itemgetter
 
 IMAGE_SIZE = 28
 NUM_CHANNELS = 1
@@ -210,12 +211,14 @@ def make_2d(cube_array, x, y, z):
     return xy_slice, xz_slice, yz_slice
 
 
-def plot_3_by_n(img_tuple, points=[(100, 200, 150)]):
+def plot_3_by_n(img_tuple, points=[(100, 200, 150)], save=False, save_name=''):
     """
     makes a 3xn subplot showing the tuple of images for each xy, xz and yz plane around the point(s)
     
     :param img_tuple: (tuple) 2D images to be plotted
     :param points: (list) tuples of x,y,z points to plot around
+    :param save: (boolean) to save fig locally or not
+    :param save_name: (string) name for save file
     :return: nothing, shows the plot
     """
     # first we iterate the image tuple 
@@ -251,8 +254,10 @@ def plot_3_by_n(img_tuple, points=[(100, 200, 150)]):
         ax.set_title("yz %d" % (i + 1))
         plt.imshow(raw_yz, cmap=plt.cm.gray)
         plt.plot(y, z, '+', color='red', ms=20)
-
-    plt.show()
+    if save:
+        plt.savefig(save_name, dpi=300, bbox_inches='tight')
+    else:
+        plt.show()
 
 
 def mask_dilation(mask, iteration=1):
@@ -374,7 +379,7 @@ def find_cm(raw, iterations=1, window_size=100, x=0, y=0, z=0):
     return x, y, z
 
 
-def find_unique_objects(raw_data, mask, volume_min=300, volume_max=15000, ratio_min=1.2, ratio_max=3):
+def find_unique_objects(raw_data, mask, volume_min=300, volume_max=15000, scale=1, save_name=''):
     """
     takes a mask and finds all the unique objects floating in that area
 
@@ -382,8 +387,8 @@ def find_unique_objects(raw_data, mask, volume_min=300, volume_max=15000, ratio_
     :param mask: (np array) 3d binary image
     :param volume_min: (int) smallest acceptable volume
     :param volume_max: (int) largest acceptable volume
-    :param ratio_min: (int) smallest acceptable volume/area
-    :param ratio_max: (int) largest acceptable volume/area
+    :param scale: (float) mm per index
+    :param save_name: (string) name of file to save for plot
     :return: (dict) unique_blob_dict, is a dictionary of arrays holding the coordinates,
     volume, area and original mask data for the given area
     """
@@ -395,7 +400,8 @@ def find_unique_objects(raw_data, mask, volume_min=300, volume_max=15000, ratio_
     # list of blobs bigger than some size
     big_blobs = [x for x in range(1,num_of_unique_blobs) if volume_max > bin_count[x] > volume_min]
     print("found %d unique BIG objects" % len(big_blobs))
-    unique_blob_dict = {'coordinates':[], 'volume':[], 'area':[], 'raw':[], 'mask':[], 'spiculated':[]}
+    unique_blobs = []
+    #{'coordinates':[], 'volume':[], 'area':[], 'raw':[], 'mask':[], 'spiculated':[]}
     # go through the objects and check if they are interesting
     for i in big_blobs:
         # generate a mask that only has the one object in it
@@ -408,6 +414,7 @@ def find_unique_objects(raw_data, mask, volume_min=300, volume_max=15000, ratio_
         # get the bounding coordinates for this object
         coords = np.argwhere(sub_mask)
         # TODO: make coordinates and raw return a consistent size (easier for cnn later)
+        # scale = mm per index
         original_size = raw_data.shape
         top_left = coords.min(axis=0)
         bottom_right = coords.max(axis=0)
@@ -439,42 +446,38 @@ def find_unique_objects(raw_data, mask, volume_min=300, volume_max=15000, ratio_
         # calculate the convex hull for this 3d object
         hull = spatial.ConvexHull(coords, 3)
         # get the surface area and volume of the object
-        area = float(hull.area)
-        volume = float(hull.volume)
+        area = float(hull.area)*scale**3
+        volume = float(hull.volume)*scale
         effective_r = np.sqrt(area/(4*np.pi))
         expected_volume = effective_r * area / 3
+        thickness = find_hull_max(hull)*scale
+        #volume/expected volume > 0.72 is a pretty good threshold for sphere-like things
+        temp_dict = {}
+        temp_dict['coordinates'].append(find_cm(sub_mask, 1))
+        temp_dict['mask'].append(sub_mask[top_left[0]:bottom_right[0],
+                                                 top_left[1]:bottom_right[1],
+                                                 top_left[2]:bottom_right[2]])
+        temp_dict['raw'].append(raw_data[top_left[0]:bottom_right[0],
+                                                 top_left[1]:bottom_right[1],
+                                                 top_left[2]:bottom_right[2]])
+        temp_dict['volume'].append(volume)
+        temp_dict['area'].append(area)
+        temp_dict['spiculated'].append(is_mass_spiculated(unique_blob_dict['raw'][-1], unique_blob_dict['mask'][-1]))
+        temp_dict['thickness'].append(thickness)
+        unique_blobs.append(temp_dict)
 
-        # # troubleshooting
-        # print('Volume = %f' % volume)
-        # print('Area = %f' % area)
-        # print('Expected Volume= %f' % expected_volume)
-        # print('Volume Ratio (real/exp)= %f' % (volume/expected_volume))
-        # plot_3d(sub_mask, 0)
-
-        # TODO: equate these arbitrary numbers to actual mm. look @ resample function in preprocess.py
-        # if this object is within our interests, let's add it to the list
-        # if volume_min < volume < volume_max and ratio_min < (volume/area) < ratio_max:
-        # if ratio_min < (volume/area) < ratio_max:
-        if volume/expected_volume > 0.76:
-            unique_blob_dict['coordinates'].append(find_cm(sub_mask, 1))
-            unique_blob_dict['mask'].append(sub_mask[top_left[0]:bottom_right[0],
-                                                     top_left[1]:bottom_right[1],
-                                                     top_left[2]:bottom_right[2]])
-            unique_blob_dict['raw'].append(raw_data[top_left[0]:bottom_right[0],
-                                                     top_left[1]:bottom_right[1],
-                                                     top_left[2]:bottom_right[2]])
-            unique_blob_dict['volume'].append(volume)
-            unique_blob_dict['area'].append(area)
-            unique_blob_dict['spiculated'].append(is_mass_spiculated(unique_blob_dict['raw'][-1], unique_blob_dict['mask'][-1]))
-
-
-            # for testing purposes
-            print('Volume = %f' % unique_blob_dict['volume'][-1])
-            print('Area = %f' % unique_blob_dict['area'][-1])
-            print('Expected Volume= %f' % expected_volume)
-            print('Volume Ratio (real/exp)= %f' % (unique_blob_dict['volume'][-1]/expected_volume))
-            print('Spiculated: {}'.format(unique_blob_dict['spiculated'][-1]))
-            plot_3_by_n((raw_data, mask, sub_mask),[unique_blob_dict['coordinates'][-1]])
+        # for testing purposes
+        print('Volume = %f' % temp_dict['volume'])
+        print('Area = %f' % temp_dict['area'])
+        print('Expected Volume= %f' % expected_volume)
+        print('Volume Ratio (real/exp)= %f' % (temp_dict['volume']/expected_volume))
+        print('Spiculated: {}'.format(temp_dict['spiculated']))
+        print('Max Thickness: {}'.format(temp_dict['thickness']))
+        if save_name:
+            plot_3_by_n((raw_data, mask, sub_mask),
+                        [temp_dict['coordinates']],
+                        save=True,
+                        save_name=save_name+"_"+ str(i))
 
             # plot_3d(lucky_winner_density_mask_erosion, 0)
         del sub_mask
@@ -491,10 +494,52 @@ def find_unique_objects(raw_data, mask, volume_min=300, volume_max=15000, ratio_
         # Area = 2178.180552
         # Volume/Area = 3.747011
 
-    return unique_blob_dict
+    return unique_blobs
 
 
-def get_mass_details(patient_raw_data, patient_mask_data):
+def find_hull_max(shape):
+    vertex_coordinates = []
+    for v in shape.vertices:
+        vertex_coordinates.append(shape.points[v])
+    for coordinates in vertex_coordinates:
+        x_plane = []
+        y_plane = []
+        z_plane = []
+        # check distances for items in the same plane
+        for compare_coordinate in [x for x in vertex_coordinates if x[0]==coordinates[0]]:
+            x_plane.append((abs(coordinates[1]-compare_coordinate[1]),
+                            abs(coordinates[2]-compare_coordinate[2]),
+                            np.sqrt((coordinates[1]-compare_coordinate[1])**2+(coordinates[2]-compare_coordinate[2])**2)))
+        for compare_coordinate in [x for x in vertex_coordinates if x[1]==coordinates[1]]:
+            y_plane.append((abs(coordinates[0]-compare_coordinate[0]),
+                            abs(coordinates[2]-compare_coordinate[2]),
+                            np.sqrt((coordinates[0]-compare_coordinate[0])**2+(coordinates[2]-compare_coordinate[2])**2)))
+        for compare_coordinate in [x for x in vertex_coordinates if x[2]==coordinates[2]]:
+            z_plane.append((abs(coordinates[1]-compare_coordinate[1]),
+                            abs(coordinates[0]-compare_coordinate[0]),
+                            np.sqrt((coordinates[1]-compare_coordinate[1])**2+(coordinates[0]-compare_coordinate[0])**2)))
+    # find the max thickness
+    # start by ordering largest to smallest on distance
+    x_plane.sort(key=itemgetter(2), reverse=True)
+    y_plane.sort(key=itemgetter(2), reverse=True)
+    z_plane.sort(key=itemgetter(2), reverse=True)
+    max_thickness = max(x_plane[0][2], y_plane[0][2], z_plane[0][2])
+    # # find the min thickness
+    # # sort biggest to smallest on plane[0]. opposite on plane[1]
+    # x_plane.sort(key=itemgetter(1))
+    # x_plane.sort(key=itemgetter(0), reverse=True)
+    # # sort biggest to smallest on plane[0]. opposite on plane[1]
+    # y_plane.sort(key=itemgetter(1))
+    # y_plane.sort(key=itemgetter(0), reverse=True)
+    # # sort biggest to smallest on plane[0]. opposite on plane[1]
+    # z_plane.sort(key=itemgetter(1))
+    # z_plane.sort(key=itemgetter(0), reverse=True)
+    return max_thickness
+
+
+
+
+def get_mass_details(patient_raw_data, patient_mask_data, scale=1, save_name=''):
     debug = False
     # # dilate (expand) the mask to get all the little nodules and whatnot
     # patient_mask_dilation = mask_dilation(patient_mask_data, 6)
@@ -530,7 +575,7 @@ def get_mass_details(patient_raw_data, patient_mask_data):
     # dilate density mask
     patient_density_mask_dilation = ndimage.binary_dilation(mask, iterations=3).astype(mask.dtype)
     patient_density_mask_erosion = ndimage.binary_erosion(patient_density_mask_dilation, iterations=3).astype(mask.dtype)
-    plot_3_by_n((patient_raw_data, patient_density_mask_erosion))
+    # plot_3_by_n((patient_raw_data, patient_density_mask_erosion))
 
     if debug:
         plot_3_by_n((patient_raw_data, patient_density_mask_erosion))
@@ -541,7 +586,10 @@ def get_mass_details(patient_raw_data, patient_mask_data):
     # del patient_density_mask_dilation
 
     # find all the objects and get their details
-    points_of_interest = find_unique_objects(patient_raw_data, patient_density_mask_erosion)
+    points_of_interest = find_unique_objects(patient_raw_data,
+                                             patient_density_mask_erosion,
+                                             scale=scale,
+                                             save_name=save_name)
     print("Found {} masses".format(len(points_of_interest['area'])))
     if debug:
         for i in range(len(points_of_interest['area'])):
